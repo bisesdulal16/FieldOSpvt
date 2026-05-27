@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "FieldOS Nepal",
+    "slug": "fieldos-nepal",
+    "version": "2.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1B3A"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "np.fieldos.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B1B3A"
+      },
+      "package": "np.fieldos.app",
+      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FieldOS needs camera access for face verification."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationPermission": "FieldOS needs location access for visit check-ins."
+        }
+      ]
+    ],
+    "scheme": "fieldos-nepal"
+  }
+}

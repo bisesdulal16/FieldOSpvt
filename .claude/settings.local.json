@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-backend\" && \"venv/Scripts/python.exe\" *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-backend\" && py *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-backend\" && python *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-backend\" && python3 *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-app\" && npm *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-app\" && npx *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-app\" && node *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-dashboard\" && npm *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-dashboard\" && npx *)",
+      "Bash(cd \"C:/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-dashboard\" && node *)",
+      "Bash(curl http://localhost:8000/health)",
+      "Bash(curl http://192.168.1.50:8000/health)",
+      "Bash(curl -X POST http://localhost:8000/api/v1/auth/login *)",
+      "Bash(curl -X POST http://192.168.1.50:8000/api/v1/auth/login *)",
+      "Bash(curl http://localhost:8000/api/v1/manager/*)",
+      "Bash(curl http://192.168.1.50:8000/api/v1/manager/*)",
+      "Bash(netstat -ano)",
+      "Bash(netstat -ano | findstr *)",
+      "Bash(taskkill /PID * /F)",
+      "Bash(Get-ChildItem *)",
+      "Bash(Select-Object *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(findstr *)",
+      "mcp__ide__getDiagnostics",
+      "Bash('/c/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-backend/venv/Scripts/python.exe' -c ' *)",
+      "Bash(npm run *)",
+      "Bash(timeout 10 \"/c/Users/Bishesh Dulal/Downloads/FIELDOS/fieldos-backend/venv/Scripts/uvicorn.exe\" app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(curl -s --connect-timeout 5 http://192.168.1.50:8000/health)",
+      "Bash(curl -s --connect-timeout 5 http://localhost:8000/health)",
+      "Bash(ipconfig)",
+      "Bash(claude mcp *)"
+    ]
+  }
+}

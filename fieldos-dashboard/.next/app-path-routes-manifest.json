@@ -1,0 +1,11 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/fieldos/[...path]/route": "/api/fieldos/[...path]",
+  "/api/route": "/api",
+  "/api/voice-ai/ask/route": "/api/voice-ai/ask",
+  "/api/voice-ai/cleanup/route": "/api/voice-ai/cleanup",
+  "/api/voice-ai/summary/route": "/api/voice-ai/summary",
+  "/api/voice-ai/transcribe/route": "/api/voice-ai/transcribe",
+  "/page": "/"
+}
