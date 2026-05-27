@@ -1,0 +1,13 @@
+var R=require("../chunks/ssr/[turbopack]_runtime.js")("server/app/page.js")
+R.c("server/chunks/ssr/[root-of-the-server]__075co9y._.js")
+R.c("server/chunks/ssr/0kmq_next_dist_esm_build_templates_app-page_0-gzqyl.js")
+R.c("server/chunks/ssr/[root-of-the-server]__0ciax9g._.js")
+R.c("server/chunks/ssr/[root-of-the-server]__10o68k7._.js")
+R.c("server/chunks/ssr/[root-of-the-server]__0cw-fq-._.js")
+R.c("server/chunks/ssr/0kmq_next_dist_client_components_0ykm233._.js")
+R.c("server/chunks/ssr/0kmq_next_dist_client_components_builtin_forbidden_0wxn~pm.js")
+R.c("server/chunks/ssr/0kmq_next_dist_client_components_builtin_unauthorized_11s1835.js")
+R.c("server/chunks/ssr/0kmq_next_dist_client_components_builtin_global-error_0qrv41w.js")
+R.c("server/chunks/ssr/0ipn_FIELDOS_fieldos-dashboard__next-internal_server_app_page_actions_12u0h~o.js")
+R.m(48133)
+module.exports=R.m(48133).exports

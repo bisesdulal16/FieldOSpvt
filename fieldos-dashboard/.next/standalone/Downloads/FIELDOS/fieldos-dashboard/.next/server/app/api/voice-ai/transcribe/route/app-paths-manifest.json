@@ -1,0 +1,3 @@
+{
+  "/api/voice-ai/transcribe/route": "app/api/voice-ai/transcribe/route.js"
+}
