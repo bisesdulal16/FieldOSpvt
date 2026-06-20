@@ -45,3 +45,7 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+
+# Python bytecode
+__pycache__/
+*.pyc
