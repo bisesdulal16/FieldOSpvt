@@ -125,8 +125,14 @@ function mapEventToBackendPayload(event: SyncQueueEvent): BackendSyncEvent {
     faceVerified: 'face_verified',
     gpsLatitude: 'gps_latitude',
     gpsLongitude: 'gps_longitude',
+    gpsAccuracyMeters: 'gps_accuracy_meters',
+    gpsAddress: 'gps_address',
     dueAmount: 'due_amount',
     outstandingAfter: 'outstanding_after',
+    // The backend stores the record's timestamp as collected_at and the
+    // dashboard filters by it — without this map collections sync with a
+    // NULL date and never appear in the manager view.
+    capturedAt: 'collected_at',
   };
   normalizedData = Object.fromEntries(
     Object.entries(normalizedData).map(([k, v]) => [keyMap[k] || k, v]),
@@ -250,6 +256,8 @@ async function runRealSync(events: SyncQueueEvent[]): Promise<SyncEventsResponse
   }
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     const response = await fetch(`${apiUrl}/sync/events`, {
       method: 'POST',
       headers: {
@@ -257,7 +265,9 @@ async function runRealSync(events: SyncQueueEvent[]): Promise<SyncEventsResponse
         'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({ events: backendEvents }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const responseText = await response.text();
 
@@ -448,11 +458,12 @@ export async function skipUnsupportedEvents(type: 'end_of_day_report'): Promise<
 }
 
 /**
- * Full pilot-ready cleanup: dismiss mock failures + skip unsupported types.
+ * Full pilot-ready cleanup: dismiss stale mock/test failure events.
+ * End-of-day reports are now handled by the backend, so they are NO longer
+ * skipped — they sync like any other entity.
  * Call this before a pilot demo to clear test artifacts.
  */
 export async function cleanupForDemo(): Promise<{ dismissed: number; skipped: number }> {
   const dismissed = await cleanupMockFailures();
-  const skipped = await skipUnsupportedEvents('end_of_day_report');
-  return { dismissed, skipped };
+  return { dismissed, skipped: 0 };
 }

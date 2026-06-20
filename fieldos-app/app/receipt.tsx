@@ -25,6 +25,16 @@ export default function DigitalReceiptScreen() {
   const displayAmount = lastReceiptAmount || parseInt(collectionAmount) || 0;
   const remainingDue = (selectedClient as any)?.remainingDue ?? Math.max(((selectedClient as any)?.dueAmount ?? 0) - displayAmount, 0);
 
+  // Close this (and any other) modal, then switch to the requested tab so we
+  // return into the single tabbed home instead of stacking a tab navigator
+  // on top of the receipt modal.
+  const goToTab = (tab: '/(tabs)/tasks' | '/(tabs)/collect') => {
+    try {
+      if (router.canDismiss()) router.dismissAll();
+    } catch { /* no modal to dismiss */ }
+    router.navigate(tab);
+  };
+
   useEffect(() => {
     getPendingCount().then(count => setHasPendingSync(count > 0)).catch(() => {});
     auditReceiptCreated(receiptId, displayAmount).catch(() => {});
@@ -78,8 +88,8 @@ export default function DigitalReceiptScreen() {
 
         <View style={styles.actions}>
           <SecondaryButton onPress={() => alert('Share Receipt feature coming soon.')} icon="share-outline">{t('shareReceipt')}</SecondaryButton>
-          <PrimaryButton onPress={() => router.push('/tasks')}>{t('returnToTasks')}</PrimaryButton>
-          <TouchableOpacity onPress={() => router.push('/record-collection')} style={styles.newButton}><Ionicons name="refresh" size={14} color={colors.gray500} /><Text style={styles.newText}>{t('newCollection')}</Text></TouchableOpacity>
+          <PrimaryButton onPress={() => goToTab('/(tabs)/tasks')}>{t('returnToTasks')}</PrimaryButton>
+          <TouchableOpacity onPress={() => goToTab('/(tabs)/collect')} style={styles.newButton}><Ionicons name="refresh" size={14} color={colors.gray500} /><Text style={styles.newText}>{t('newCollection')}</Text></TouchableOpacity>
         </View>
       </ScrollView>
     </View>
