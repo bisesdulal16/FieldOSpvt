@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, outerjoin, case
+from sqlalchemy.orm import aliased
 
 from app.database import get_db
 from app.deps.auth_deps import require_manager_or_admin
@@ -468,42 +469,29 @@ async def get_collections(
                 "collected_npr": round(day_total, 2),
             })
 
-        # Recent collections — with client and officer info
+        # Recent collections — with client and officer info.
+        # Officer is resolved from Collection.officer_id (what the mobile app
+        # sends on every collection, task-linked or ad-hoc); when that is
+        # missing on legacy rows, fall back to the assigned task's officer.
+        direct_officer = aliased(User)
+        task_officer = aliased(User)
         stmt = (
             select(
                 Collection,
                 Client.name.label("client_name"),
                 Client.member_id.label("member_id"),
-                User.name.label("officer_name"),
+                func.coalesce(direct_officer.name, task_officer.name).label("officer_name"),
             )
             .outerjoin(Client, Collection.client_id == Client.id)
+            .outerjoin(direct_officer, Collection.officer_id == direct_officer.id)
             .outerjoin(TaskAssignment, Collection.task_id == TaskAssignment.id)
-            .outerjoin(User, TaskAssignment.user_id == User.id)
+            .outerjoin(task_officer, TaskAssignment.user_id == task_officer.id)
             .where(Collection.collected_at.like(f"{today}%"))
             .order_by(Collection.collected_at.desc())
             .limit(recent_limit)
         )
         result = await db.execute(stmt)
         rows = result.all()
-
-        # Also get collections with officer_id but no task_id
-        if rows:
-            coll_ids = {r[0].id for r in rows}
-            unlinked_result = await db.execute(
-                select(Collection, Client.name.label("client_name"), Client.member_id.label("member_id"), User.name.label("officer_name"))
-                .outerjoin(Client, Collection.client_id == Client.id)
-                .outerjoin(User, Collection.officer_id == User.id)
-                .where(and_(
-                    Collection.collected_at.like(f"{today}%"),
-                    Collection.officer_id.isnot(None),
-                    Collection.task_id.is_(None),
-                    Collection.id.not_in(list(coll_ids)),
-                ))
-                .order_by(Collection.collected_at.desc())
-                .limit(recent_limit)
-            )
-            for row in unlinked_result.all():
-                rows.append(row)
 
         recent = []
         for coll, client_name, member_id, officer_name in rows:
