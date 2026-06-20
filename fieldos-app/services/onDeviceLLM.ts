@@ -30,6 +30,7 @@ export function setOnDeviceLLM(
 ): void {
   _status = status;
   _generate = status === 'ready' ? generate : null;
+  console.log(`[OnDeviceLLM] status → ${status}`);
   for (const l of _listeners) l(status);
 }
 
@@ -49,11 +50,16 @@ export function subscribeOnDeviceStatus(cb: (s: OnDeviceStatus) => void): () => 
  * caller should then fall back to the server LLM / heuristic.
  */
 export async function onDeviceGenerate(prompt: string): Promise<string | null> {
-  if (_status !== 'ready' || !_generate) return null;
+  if (_status !== 'ready' || !_generate) {
+    console.log(`[OnDeviceLLM] generate skipped (status=${_status}) → falling back to server/heuristic`);
+    return null;
+  }
   try {
+    console.log('[OnDeviceLLM] generating on-device…');
     const out = await _generate(prompt);
     return out && out.trim() ? out.trim() : null;
-  } catch {
+  } catch (e) {
+    console.log('[OnDeviceLLM] on-device generate failed → fallback', e);
     return null;
   }
 }

@@ -27,7 +27,11 @@
       "permissions": [
         "CAMERA",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -48,6 +52,12 @@
       ],
       "expo-llm-mediapipe"
     ],
-    "scheme": "fieldos-nepal"
+    "scheme": "fieldos-nepal",
+    "extra": {
+      "eas": {
+        "projectId": "24b312d2-0f5c-4d91-bf67-e3c7a34ff221"
+      }
+    },
+    "owner": "bisesdulal16"
   }
 }

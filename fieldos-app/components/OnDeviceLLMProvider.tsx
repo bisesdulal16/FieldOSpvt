@@ -48,12 +48,14 @@ function RealProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       const mem = Device.totalMemory ?? 0;
+      console.log(`[OnDeviceLLM] device RAM=${(mem / 1024 ** 3).toFixed(1)}GB, gate=${(MIN_RAM_BYTES / 1024 ** 3).toFixed(1)}GB, isDevice=${Device.isDevice}`);
       if (!mem || mem < MIN_RAM_BYTES) {
         setOnDeviceLLM('unavailable', null); // low-end / unknown device → server fallback
         return;
       }
       try {
         const cur = llmRef.current;
+        console.log(`[OnDeviceLLM] downloadStatus=${cur.downloadStatus}; starting download/load…`);
         if (cur.downloadStatus !== 'downloaded') {
           setOnDeviceLLM('downloading', null);
           await cur.downloadModel();
