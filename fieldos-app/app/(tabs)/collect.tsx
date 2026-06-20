@@ -25,7 +25,7 @@ const PAYMENT_METHODS = [
 
 export default function RecordCollectionScreen() {
   const router = useRouter();
-  const { selectedClient, collectionAmount, setCollectionAmount, openFaceVerification, setClientDueAmount, setClientOutstanding, setLastReceiptAmount, setReceiptStatus, setReceiptId } = useFieldOSStore();
+  const { selectedClient, setSelectedClient, collectionAmount, setCollectionAmount, openFaceVerification, setClientDueAmount, setClientOutstanding, setLastReceiptAmount, setReceiptStatus, setReceiptId } = useFieldOSStore();
   const { t } = useTranslation();
   const [selectedMethod, setSelectedMethod] = useState('cash');
   const [showKeypad, setShowKeypad] = useState(false);
@@ -128,13 +128,15 @@ export default function RecordCollectionScreen() {
     }
     setSaving(false);
 
-    console.log('[Collect] receipt route navigation');
-    if (isHighValue) {
-      openFaceVerification('high-value-collection');
-      return;
+    console.log('[Collect] navigating to receipt');
+    try {
+      if (isHighValue) {
+        openFaceVerification('high-value-collection');
+      }
+    } catch (e) {
+      console.warn('[Collect] face verification error:', e);
     }
-
-    router.replace('/receipt');
+    router.push('/receipt');
   };
 
   const handleKeyPress = (key: string) => {
