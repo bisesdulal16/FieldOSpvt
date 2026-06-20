@@ -22,8 +22,8 @@ async def create_collection(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        receipt_id = auth_service.generate_receipt_id()
-        is_high_value = float(request.amount) >= 50000
+        receipt_id = request.receipt_id or auth_service.generate_receipt_id()
+        is_high_value = request.is_high_value or float(request.amount) >= 50000
 
         collection = Collection(
             receipt_id=receipt_id,

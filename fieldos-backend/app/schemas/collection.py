@@ -13,7 +13,12 @@ class CollectionCreate(BaseModel):
     face_verified: bool = False
     gps_latitude: float | None = None
     gps_longitude: float | None = None
+    gps_accuracy_meters: float | None = None
+    receipt_id: str | None = None
+    is_high_value: bool = False
     collected_at: str | None = None
+
+    model_config = {"extra": "ignore"}
 
 
 class CollectionResponse(BaseModel):
