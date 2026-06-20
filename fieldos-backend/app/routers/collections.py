@@ -39,6 +39,8 @@ async def create_collection(
             face_verified=request.face_verified or False,
             gps_latitude=request.gps_latitude,
             gps_longitude=request.gps_longitude,
+            gps_address=request.gps_address,
+            gps_accuracy_meters=request.gps_accuracy_meters,
             collected_at=request.collected_at or datetime.now(timezone.utc).isoformat(),
             cbs_verified=False,
         )
