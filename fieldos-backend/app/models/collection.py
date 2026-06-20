@@ -24,5 +24,7 @@ class Collection(Base):
     face_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     gps_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     gps_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gps_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    gps_accuracy_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
     collected_at: Mapped[str | None] = mapped_column(String(30), nullable=True)
     cbs_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

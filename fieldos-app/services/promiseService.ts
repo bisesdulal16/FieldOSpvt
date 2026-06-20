@@ -41,7 +41,7 @@ export async function recordPromiseToPay(
     amount: req.promisedAmount,
     reason: req.reason,
     expectedDate: req.expectedPaymentDate,
-  });
+  }, ptpId);
 
   // 3. Audit
   await auditPromiseToPayCreated(String(req.clientId), req.promisedAmount, req.reason);

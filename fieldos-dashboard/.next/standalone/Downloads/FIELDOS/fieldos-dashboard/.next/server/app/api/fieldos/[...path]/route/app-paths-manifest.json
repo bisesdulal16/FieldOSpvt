@@ -1,3 +1,0 @@
-{
-  "/api/fieldos/[...path]/route": "app/api/fieldos/[...path]/route.js"
-}

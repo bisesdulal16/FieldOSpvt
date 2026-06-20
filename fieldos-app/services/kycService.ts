@@ -68,7 +68,7 @@ export async function captureKycDocument(
     documentType: params.documentType,
     fileName: params.fileName,
     capturedAt: new Date().toISOString(),
-  });
+  }, docId);
 
   // 3. Audit
   await auditKycDocumentCaptured(
