@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0B1B3A"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "np.fieldos.app"
@@ -22,7 +24,11 @@
         "backgroundColor": "#0B1B3A"
       },
       "package": "np.fieldos.app",
-      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -39,7 +45,8 @@
         {
           "locationPermission": "FieldOS needs location access for visit check-ins."
         }
-      ]
+      ],
+      "expo-llm-mediapipe"
     ],
     "scheme": "fieldos-nepal"
   }
