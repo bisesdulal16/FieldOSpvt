@@ -165,6 +165,18 @@ export async function requestAICleanup(noteId: string | number): Promise<{
     const note = await getVoiceNoteById(Number(noteId));
     if (!note) return { success: false, error: 'Note not found' };
 
+    // Tier 1: on-device Gemma (works fully offline on capable phones).
+    const { onDeviceGenerate } = require('./onDeviceLLM');
+    const onDevice = await onDeviceGenerate(
+      `Clean up this field-visit voice note. Fix grammar, remove filler words, ` +
+      `keep the original language and meaning. Return only the cleaned note:\n\n${note.raw_text}`,
+    );
+    if (onDevice) {
+      await updateCleanedText(Number(noteId), onDevice);
+      return { success: true, cleanedText: onDevice };
+    }
+
+    // Tier 2: backend (server LLM → heuristic).
     const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
     const token = getAccessToken();
 
@@ -217,6 +229,18 @@ export async function requestAISummary(noteId: string | number, params: {
     const note = await getVoiceNoteById(Number(noteId));
     if (!note) return { success: false, error: 'Note not found' };
 
+    // Tier 1: on-device Gemma.
+    const { onDeviceGenerate } = require('./onDeviceLLM');
+    const onDevice = await onDeviceGenerate(
+      `Summarize these microfinance field-visit notes into 3-5 short bullet points. ` +
+      `Keep facts exactly as written; do not invent amounts or promises:\n\n${note.raw_text}`,
+    );
+    if (onDevice) {
+      await updateAISummary(Number(noteId), onDevice);
+      return { success: true, summary: onDevice };
+    }
+
+    // Tier 2: backend (server LLM → heuristic).
     const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
     const token = getAccessToken();
 
