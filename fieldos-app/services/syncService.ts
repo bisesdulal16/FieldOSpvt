@@ -9,7 +9,7 @@
  */
 
 import { getConfig } from './apiClient';
-import { getPendingEvents, markEventSyncing, markEventSynced, markEventFailed, getPendingCount } from '../db/repositories/syncQueueRepo';
+import { getPendingEvents, mapEntityTypeToBackend, markEventSyncing, markEventSynced, markEventFailed, getPendingCount } from '../db/repositories/syncQueueRepo';
 import { markAllAuditsSynced } from '../db/repositories/auditRepo';
 import { setSetting } from '../db/repositories/settingsRepo';
 import { getCollectionByReceiptId } from '../db/repositories/collectionsRepo';
@@ -99,7 +99,7 @@ interface BackendSyncEvent {
   entity_type: string;
   entity_id: string;
   operation: string;
-  data: Record<string, unknown>;
+  payload: Record<string, unknown>;
   timestamp?: string;
 }
 
@@ -133,10 +133,10 @@ function mapEventToBackendPayload(event: SyncQueueEvent): BackendSyncEvent {
   );
 
   return {
-    entity_type: event.type ?? event.entity_type ?? 'audit_event',
+    entity_type: mapEntityTypeToBackend(event.type) ?? 'audit_event',
     entity_id: String(event.id),
     operation: event.operation ?? 'create',
-    data: normalizedData,
+    payload: normalizedData,
     timestamp: event.createdAt,
   };
 }

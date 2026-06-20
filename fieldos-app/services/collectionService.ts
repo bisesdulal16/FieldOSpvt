@@ -51,7 +51,7 @@ export async function recordCollection(req: CreateCollectionRequest): Promise<Ap
     gpsLatitude: req.gpsLatitude,
     gpsLongitude: req.gpsLongitude,
     capturedAt: new Date().toISOString(),
-  });
+  }, collectionId);
 
   // Audit
   await auditCollectionRecorded(collectionId, receiptId, req.amount, req.paymentMethod);

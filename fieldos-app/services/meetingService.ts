@@ -88,7 +88,7 @@ export async function completeCenterMeeting(
     totalMembers: req.totalMembers,
     collectionReceived: req.collectionReceived,
     meetingDate: req.meetingDate,
-  });
+  }, meetingId);
 
   // 4. Audit
   await auditMeetingCompleted(String(meetingId), req.totalMembers, req.presentCount + req.paidCount, req.collectionReceived);

@@ -105,7 +105,7 @@ export async function createNote(params: {
 
     // Add to sync queue
     try {
-      await enqueueSyncEvent('voice_note', { voice_note_id: noteId });
+      await enqueueSyncEvent('voice_note', { voice_note_id: noteId }, noteId);
     } catch { /* silent */ }
 
     return { success: true, noteId };
