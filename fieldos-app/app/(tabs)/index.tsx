@@ -14,6 +14,10 @@ import { getPriorityQueue, getSuggestions } from '../../services/aiService';
 import { getCurrentUser } from '../../services/authService';
 import { fetchAnnouncements } from '../../services/announcementService';
 import type { PriorityClient, AISuggestion } from '../../services/aiService';
+import { fetchAssignedTasks } from '../../services/taskService';
+import { getActivePromises } from '../../db/repositories/promiseToPayRepo';
+import { getTotalCollectedToday } from '../../db/repositories/collectionsRepo';
+import { query } from '../../db/database';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -37,6 +41,38 @@ export default function DashboardScreen() {
   const [topClient, setTopClient] = useState<PriorityClient | null>(null);
   const [topSuggestion, setTopSuggestion] = useState<AISuggestion | null>(null);
   const [urgentCount, setUrgentCount] = useState(0);
+
+  // Real daily figures computed from the local DB
+  const [home, setHome] = useState({ dueClients: 0, overdue: 0, visitsPlanned: 0, visitsCompleted: 0, target: 0, collected: 0, promiseDue: 0 });
+  const formatK = (n: number) => (n >= 1000 ? `NPR ${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K` : `NPR ${n}`);
+
+  const loadHomeStats = useCallback(async () => {
+    try {
+      // Tasks come from the backend (assigned by the manager); collections,
+      // visits and promises are created on-device so they read from local DB.
+      const res = await fetchAssignedTasks().catch(() => null);
+      const tasks: any[] = res && res.success && Array.isArray(res.data) ? res.data : [];
+      const ttype = (x: any) => x.task_type ?? x.taskType;
+      const prio = (x: any) => String(x.priority ?? '');
+      const visitTasks = tasks.filter((x) => ttype(x) === 'visit');
+      const target = tasks
+        .filter((x) => ttype(x) === 'collection')
+        .reduce((a: number, x: any) => a + Number(x.amount ?? x.amount_npr ?? 0), 0);
+      const collected = await getTotalCollectedToday();
+      const promises = await getActivePromises();
+      const visitRows = await query<{ n: number }>("SELECT COUNT(*) as n FROM visit_checkins WHERE date(checked_in_at) = date('now')");
+      const overdue = tasks.filter((x) => prio(x) === 'high' || prio(x) === 'urgent').length;
+      setHome({
+        dueClients: tasks.length,
+        overdue,
+        visitsPlanned: visitTasks.length,
+        visitsCompleted: visitRows[0]?.n ?? 0,
+        target,
+        collected,
+        promiseDue: promises.length,
+      });
+    } catch { /* offline-first: keep zeros */ }
+  }, []);
 
   const fetchAIData = useCallback(async () => {
     try {
@@ -70,7 +106,8 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     loadSyncStatus();
-  }, [loadSyncStatus]);
+    loadHomeStats();
+  }, [loadSyncStatus, loadHomeStats]);
 
   useEffect(() => {
     if (dayStarted) {
@@ -168,10 +205,10 @@ export default function DashboardScreen() {
             </View>
 
             <View style={styles.grid2}>
-              <SummaryCard label={t('dueClients')} value="12" icon="people-outline" color={colors.orange} />
-              <SummaryCard label={t('visitsPlanned')} value="8" icon="location-outline" color={colors.navyLight} />
-              <SummaryCard label={t('collectionTarget')} value="NPR 185K" icon="wallet-outline" color={colors.green} />
-              <SummaryCard label={t('promiseDue')} value="3" icon="time-outline" color="#D97706" />
+              <SummaryCard label={t('dueClients')} value={String(home.dueClients)} icon="people-outline" color={colors.orange} />
+              <SummaryCard label={t('visitsPlanned')} value={String(home.visitsPlanned)} icon="location-outline" color={colors.navyLight} />
+              <SummaryCard label={t('collectionTarget')} value={formatK(home.target)} icon="wallet-outline" color={colors.green} />
+              <SummaryCard label={t('promiseDue')} value={String(home.promiseDue)} icon="time-outline" color="#D97706" />
             </View>
           </>
         ) : (
@@ -207,10 +244,10 @@ export default function DashboardScreen() {
             ) : null}
 
             <View style={styles.grid2}>
-              <SummaryCard label={t('dueClients')} value="12" icon="people-outline" color={colors.orange} subtext="4 overdue" />
-              <SummaryCard label={t('visitsPlanned')} value="8" icon="location-outline" color={colors.navyLight} subtext="3 completed" />
-              <SummaryCard label={t('collectionTarget')} value="NPR 185K" icon="flag-outline" color={colors.green} subtext="NPR 45K done" />
-              <SummaryCard label={t('promiseDue')} value="3" icon="time-outline" color="#D97706" subtext="1 overdue" />
+              <SummaryCard label={t('dueClients')} value={String(home.dueClients)} icon="people-outline" color={colors.orange} subtext={`${home.overdue} overdue`} />
+              <SummaryCard label={t('visitsPlanned')} value={String(home.visitsPlanned)} icon="location-outline" color={colors.navyLight} subtext={`${home.visitsCompleted} completed`} />
+              <SummaryCard label={t('collectionTarget')} value={formatK(home.target)} icon="flag-outline" color={colors.green} subtext={`${formatK(home.collected)} done`} />
+              <SummaryCard label={t('promiseDue')} value={String(home.promiseDue)} icon="time-outline" color="#D97706" subtext="active" />
             </View>
 
             <View style={styles.pendingSyncCard}>
