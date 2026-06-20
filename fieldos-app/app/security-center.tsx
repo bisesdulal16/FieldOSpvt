@@ -4,6 +4,9 @@ import {
   Switch, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import * as Device from 'expo-device';
+import * as Application from 'expo-application';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
 import { useFieldOSStore } from '../store/useFieldOSStore';
@@ -165,6 +168,10 @@ export default function SecurityCenterScreen() {
   const { lastSyncTime } = useFieldOSStore();
   const { t } = useTranslation();
 
+  // Device info (loaded from native APIs)
+  const [deviceId, setDeviceId] = useState('');
+  const [appVersion] = useState(Application.nativeApplicationVersion || '2.1.0');
+
   // Security settings state
   const [appLockEnabled, setAppLockEnabled] = useState(true);
   const [faceVerifyEnabled, setFaceVerifyEnabled] = useState(true);
@@ -174,6 +181,18 @@ export default function SecurityCenterScreen() {
   const [pendingCount, setPendingCount] = useState(0);
   const [recentEvents, setRecentEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Load device info on mount
+  useEffect(() => {
+    (async () => {
+      let id = await SecureStore.getItemAsync('device_id');
+      if (!id) {
+        id = `DEV-${Device.deviceName || 'DEVICE'}-${Date.now().toString(36).toUpperCase()}`;
+        await SecureStore.setItemAsync('device_id', id);
+      }
+      setDeviceId(id);
+    })();
+  }, []);
 
   // Load settings from DB
   const loadSettings = useCallback(async () => {
@@ -409,17 +428,17 @@ export default function SecurityCenterScreen() {
           <SettingsRow
             icon="hardware-chip-outline"
             label={t('deviceIdLabel')}
-            description={maskDeviceId('DEV-A1B2-C3D4-1234')}
+            description={deviceId ? maskDeviceId(deviceId) : 'Loading...'}
           />
           <SettingsRow
             icon="phone-portrait-outline"
             label={t('deviceModelLabel')}
-            description={Platform.OS === 'web' ? 'Web Browser' : Platform.OS === 'ios' ? 'iOS Device' : 'Android Device'}
+            description={Device.isDevice ? `${Device.manufacturer || Platform.OS} ${Device.modelName || ''}`.trim() : 'Web Browser'}
           />
           <SettingsRow
             icon="information-circle-outline"
             label={t('appVersionLabel')}
-            description="v3.0.0"
+            description={appVersion}
           />
           <SettingsRow
             icon="cloud-done-outline"
@@ -542,7 +561,7 @@ export default function SecurityCenterScreen() {
           <SettingsRow
             icon="information-circle-outline"
             label={t('appVersionLabel')}
-            description="v3.0.0"
+            description={appVersion}
           />
           <SettingsRow
             icon="shield-outline"

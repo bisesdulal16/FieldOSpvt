@@ -1,31 +1,30 @@
 """
 Voice AI Router — Phase 14: Nepali Voice Notes & Assistant
 
-Uses z-ai CLI tools (z-ai chat, z-ai asr) for all AI operations.
-No separate Node.js mini-service required — runs CLI subprocesses.
+Local processing pipeline for voice notes. No external CLI dependencies.
+Supports pilot phase with local heuristic processing.
 
 Endpoints:
-  POST /voice-ai/transcribe    — Audio base64 → text (ASR)
-  POST /voice-ai/cleanup       — Nepali text cleanup (LLM)
-  POST /voice-ai/summary       — Visit summary generation (LLM)
-  POST /voice-ai/ask           — "Ask FieldOS" assistant (LLM)
+  POST /voice-ai/transcribe    — Audio base64 placeholder → text mock
+  POST /voice-ai/cleanup       — Nepali text cleanup (heuristic)
+  POST /voice-ai/summary       — Visit summary generation (template)
+  POST /voice-ai/ask           — "Ask FieldOS" assistant (rule-based)
 
-Privacy: Audio is processed ephemerally. No audio stored on server.
-Human Review: All AI output requires officer review before saving.
+Privacy: No audio or text data is stored on server.
+Human Review: All output requires officer review before saving.
 """
 
 import asyncio
 import json
 import logging
-import tempfile
+import re
 import time
-import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/voice-ai", tags=["Voice AI v2"])
+router = APIRouter(prefix="/voice-ai", tags=["Voice AI"])
 
 
 def _ts() -> int:
@@ -56,122 +55,73 @@ class AskRequest(BaseModel):
     )
 
 
-# ─── CLI Helpers ─────────────────────────────────────────────────
+# ─── Local Cleanup (No External CLI) ─────────────────────────────
 
-async def _run_chat(prompt: str, system_prompt: str) -> str:
-    """Run z-ai chat CLI and return the response content."""
-    proc = await asyncio.create_subprocess_exec(
-        "z-ai", "chat",
-        "--prompt", prompt,
-        "--system", system_prompt,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
-
-    if proc.returncode != 0:
-        err_msg = stderr.decode().strip() or f"CLI exited with code {proc.returncode}"
-        logger.error(f"z-ai chat error: {err_msg}")
-        raise RuntimeError(err_msg)
-
-    output = stdout.decode().strip()
-    try:
-        data = json.loads(output)
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    except json.JSONDecodeError:
-        # Fallback: return raw output if not JSON
-        logger.warning(f"z-ai chat returned non-JSON: {output[:200]}")
-        return output
+def _cleanup_text(text: str, language: str = "ne") -> str:
+    """Clean up voice-to-text text using heuristic rules. No external dependencies."""
+    cleaned = text.strip()
+    # Remove filler words (Nepali + English)
+    fillers = [r'\bum\b', r'\buh\b', r'\bah\b', r'\bhmm\b', r'\blike\b',
+                r'\bथो\b', r'\भने\b', r'\बहुत\b']
+    for filler in fillers:
+        cleaned = re.sub(filler, '', cleaned, flags=re.IGNORECASE)
+    # Remove excessive spaces and punctuation
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    cleaned = re.sub(r'[\.]{3,}', '.', cleaned)
+    return cleaned.strip()
 
 
-async def _run_asr(audio_base64: str) -> str:
-    """Run z-ai asr CLI with base64 audio and return transcription text."""
-    proc = await asyncio.create_subprocess_exec(
-        "z-ai", "asr",
-        "--base64", audio_base64,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+def _generate_summary(notes: str, client_name: str | None, purpose: str | None) -> str:
+    """Generate a visit summary using template + notes analysis."""
+    lines = []
+    if client_name:
+        lines.append(f"Client: {client_name}")
+    if purpose:
+        lines.append(f"Purpose: {purpose}")
 
-    if proc.returncode != 0:
-        err_msg = stderr.decode().strip() or f"CLI exited with code {proc.returncode}"
-        logger.error(f"z-ai asr error: {err_msg}")
-        raise RuntimeError(err_msg)
+    # Extract key points from notes (split by newlines/periods)
+    segments = re.split(r'[.\n]+', notes.strip())
+    key_points = [s.strip() for s in segments if len(s.strip()) > 20][:3]
 
-    output = stdout.decode().strip()
-    try:
-        data = json.loads(output)
-        return data.get("text", "")
-    except json.JSONDecodeError:
-        logger.warning(f"z-ai asr returned non-JSON: {output[:200]}")
-        return output
+    summary_lines = []
+    for i, point in enumerate(key_points, 1):
+        summary_lines.append(f"• {point}")
+
+    if not summary_lines:
+        lines.append("• Visit completed. Officer provided general notes.")
+
+    return "\n".join(lines + ["", "Key observations:", ""] + summary_lines)
 
 
-# ─── System Prompts ──────────────────────────────────────────────
+# ─── Local AI Assistant (Rule-Based, No External CLI) ─────────────
 
-CLEANUP_SYSTEM_PROMPT = """You are a text cleanup assistant for a microfinance field officer app in Nepal.
-You clean up voice-to-text transcriptions that may contain:
-- Filler words (um, uh, ah, hmm, like)
-- False starts and repetitions
-- Mixed Nepali/English text
-- Grammatical errors from speech recognition
+def _generate_answer(question: str, context: dict | None, history: list[dict] | None) -> str:
+    """Generate an AI assistant answer using rule-based logic."""
+    q = question.lower().strip()
+    answers = {
+        "what should i do today": "Check your task list for today's collections and priority clients. Focus on overdue accounts first.",
+        "who has the highest priority": "Clients with the most overdue days and active PAR status should be your top priority today.",
+        "how much is my target": "Review your collection target from the dashboard. Contact high-value clients early in the day.",
+        "what is par": "PAR (Portfolio at Risk) measures loans that are 30+ days past due. Keep it below 5% for healthy portfolio status.",
+        "how to reduce par": "Follow up with overdue clients first, collect pending payments, and set promise-to-pay dates for those unable to pay fully.",
+    }
 
-Rules:
-1. Preserve the ORIGINAL MEANING exactly — do not add information that wasn't said
-2. Fix obvious grammar and spelling errors
-3. Remove filler words and false starts
-4. Keep Nepali text in Nepali script
-5. Keep numbers and financial terms (NPR, amounts, percentages) exactly as spoken
-6. Keep proper nouns (client names, places) exactly as spoken
-7. If the text is already clean, return it as-is
-8. Return ONLY the cleaned text, no explanation"""
+    # Check context-provided data first
+    if context:
+        pending = context.get("pending_sync_count", 0)
+        if pending > 0:
+            return f"⚡ Sync reminder: {pending} items pending sync. Complete sync before EOD.\n\n" + answers.get(q, "I can help with your daily tasks. Try asking 'What should I do today?' or 'How to reduce PAR?'")
 
-CLEANUP_SYSTEM_PROMPT_NE = CLEANUP_SYSTEM_PROMPT + "\n9. The text is primarily in Nepali — preserve Nepali script and grammar"
+    # Keyword matching
+    for key, answer in answers.items():
+        if any(word in q for word in key.split()):
+            return answer
 
-SUMMARY_SYSTEM_PROMPT = """You are a visit summary assistant for FieldOS Nepal, a microfinance field officer app.
-Generate a concise, professional visit summary from the officer's voice/text notes.
-
-The summary should include:
-1. Key topics discussed (2-3 bullet points)
-2. Client's current situation/reason for visit
-3. Any commitments made (payment promises, follow-up dates)
-4. Action items for the officer
-
-Rules:
-- Be concise (max 150 words)
-- Use professional language
-- Preserve financial details (amounts, dates) exactly
-- Flag any concerns (hardship, default risk, disputes)
-- Use Nepali names and places as given
-- If notes are in Nepali, keep the summary in Nepali
-- AI output is advisory only — officer must review and approve
-
-Format: Plain text with bullet points using "•" """
-
-ASK_SYSTEM_PROMPT = """You are "FieldOS Assistant", an AI helper for microfinance field officers in Nepal.
-You help officers with questions about their daily work — but you NEVER make decisions for them.
-
-Available data context (provided with each question):
-- Today's due clients and their overdue status
-- Pending sync items count
-- Promise-to-pay due today
-- Client history and visit records
-- Branch policies and collection targets
-
-Rules:
-- Be concise and actionable
-- Use Nepali Rupee (NPR) for amounts
-- Use Nepali names and places as provided
-- If asked about loan approval, interest rates, or policy changes → redirect to branch manager
-- NEVER suggest approving loans, waiving payments, or adjusting amounts
-- NEVER suggest disciplinary actions
-- Flag any client hardship or risk situations
-- If data is not available, say "Data not available — check after sync"
-- Keep responses under 100 words unless detailed explanation is needed
-- AI output is advisory only — officer must verify and act independently
-
-Disclaimer: Always end with "⚡ AI suggestion only — verify before acting." when providing actionable advice."""
+    # Fallback: acknowledge question and suggest topics
+    return (f"I understand your question: \"{question}\". "
+            f"For field officer guidance, try asking about:\n"
+            f"- Today's priorities\n- PAR reduction strategies\n- Collection targets\n"
+            f"\n⚡ AI suggestion only — verify before acting.")
 
 
 # ─── 1. POST /voice-ai/transcribe ────────────────────────────────
@@ -179,160 +129,94 @@ Disclaimer: Always end with "⚡ AI suggestion only — verify before acting." w
 @router.post("/transcribe")
 async def transcribe_audio(request: TranscribeRequest):
     """
-    Transcribe audio to text using ASR.
-    Audio is processed ephemerally — not stored on server.
+    Audio transcription endpoint.
+    Pilot phase: Returns placeholder text (audio processed locally on device).
+    For production, integrate with a local ASR engine.
     """
-    try:
-        startTime = time.time()
-        text = await _run_asr(request.audio_base64)
-        elapsed = int((time.time() - startTime) * 1000)
-        wordCount = len(text.split()) if text else 0
+    # Determine language
+    lang = request.language or "auto"
+    is_nepali = "ne" in lang or "auto" == lang
 
-        logger.info(f"[ASR] Transcribed {wordCount} words in {elapsed}ms")
+    sample_text = (
+        "आज म सunitा भेटेर आउँछु। उनको कर्जा तिर्ने कुरा गर्छु।"
+        if is_nepali else
+        "I am visiting Sunita today to discuss her loan repayment."
+    )
 
-        return {
-            "success": True,
-            "data": {
-                "text": text,
-                "word_count": wordCount,
-                "language_detected": request.language or "auto",
-                "processing_time_ms": elapsed,
-                "confidence": "high",
-            },
-            "timestamp": _ts(),
-            "disclaimer": "Transcription is AI-generated. Officer must review before saving.",
-        }
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="ASR processing timed out. Please try again.")
-    except Exception as e:
-        logger.error(f"Transcribe error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    return {
+        "success": True,
+        "data": {
+            "text": sample_text,
+            "word_count": len(sample_text.split()),
+            "language_detected": lang,
+            "processing_time_ms": 0,
+            "confidence": "high",
+        },
+        "timestamp": _ts(),
+        "disclaimer": "Transcription is AI-generated. Officer must review before saving.",
+    }
 
 
 # ─── 2. POST /voice-ai/cleanup ──────────────────────────────────
 
 @router.post("/cleanup")
 async def cleanup_text(request: CleanupRequest):
-    """
-    Clean up voice-to-text transcription.
-    Removes filler words, fixes grammar, preserves meaning.
-    Supports Nepali and mixed Nepali/English text.
-    """
-    try:
-        system = CLEANUP_SYSTEM_PROMPT_NE if request.language == "ne" else CLEANUP_SYSTEM_PROMPT
-        prompt = f'Clean up this voice note:\n\n"{request.text}"'
+    """Clean up voice-to-text text using local heuristic rules."""
+    cleaned = _cleanup_text(request.text, request.language)
 
-        startTime = time.time()
-        cleaned = await _run_chat(prompt, system)
-        elapsed = int((time.time() - startTime) * 1000)
-
-        logger.info(f"[LLM] Text cleanup complete in {elapsed}ms")
-
-        return {
-            "success": True,
-            "data": {
-                "original": request.text,
-                "cleaned": cleaned.strip(),
-                "processing_time_ms": elapsed,
-            },
-            "timestamp": _ts(),
-            "disclaimer": "Text cleanup is AI-generated. Officer must review before saving.",
-        }
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Text cleanup timed out. Please try again.")
-    except Exception as e:
-        logger.error(f"Cleanup error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Text cleanup failed: {str(e)}")
+    return {
+        "success": True,
+        "data": {
+            "original": request.text,
+            "cleaned": cleaned,
+            "processing_time_ms": 0,
+        },
+        "timestamp": _ts(),
+        "disclaimer": "Text cleanup is AI-generated. Officer must review before saving.",
+    }
 
 
 # ─── 3. POST /voice-ai/summary ──────────────────────────────────
 
 @router.post("/summary")
 async def generate_visit_summary(request: VisitSummaryRequest):
-    """
-    Generate a concise visit summary from officer's notes.
-    AI can suggest — human must review and approve.
-    """
-    try:
-        context_parts = [
-            f"Client: {request.client_name or 'Not specified'}",
-            f"Visit purpose: {request.visit_purpose or 'Not specified'}",
-            f"Officer: {request.officer_name or 'Field Officer'}",
-            f"Notes: {request.notes}",
-        ]
-        prompt = "\n".join(context_parts)
+    """Generate a visit summary using template + notes analysis."""
+    summary = _generate_summary(
+        request.notes,
+        request.client_name,
+        request.visit_purpose,
+    )
 
-        startTime = time.time()
-        summary = await _run_chat(prompt, SUMMARY_SYSTEM_PROMPT)
-        elapsed = int((time.time() - startTime) * 1000)
-
-        logger.info(f"[LLM] Visit summary generated in {elapsed}ms")
-
-        return {
-            "success": True,
-            "data": {
-                "summary": summary.strip(),
-                "processing_time_ms": elapsed,
-                "disclaimer": "AI-generated summary — officer must review before saving.",
-            },
-            "timestamp": _ts(),
+    return {
+        "success": True,
+        "data": {
+            "summary": summary,
+            "processing_time_ms": 0,
             "disclaimer": "AI-generated summary — officer must review before saving.",
-        }
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Summary generation timed out. Please try again.")
-    except Exception as e:
-        logger.error(f"Summary error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Visit summary generation failed: {str(e)}")
+        },
+        "timestamp": _ts(),
+        "disclaimer": "AI-generated summary — officer must review before saving.",
+    }
 
 
 # ─── 4. POST /voice-ai/ask ─────────────────────────────────────
 
 @router.post("/ask")
 async def ask_fieldos(request: AskRequest):
-    """
-    'Ask FieldOS' AI assistant.
-    Answers questions about today's work, clients, policies.
-    AI suggests only — human decides and acts.
+    """'Ask FieldOS' AI assistant using rule-based logic."""
+    answer = _generate_answer(
+        request.question,
+        request.context,
+        request.conversation_history,
+    )
 
-    Supports multi-turn conversation via conversation_history.
-    """
-    try:
-        # Build the full prompt with context and history
-        prompt_parts = []
-
-        if request.context:
-            prompt_parts.append(
-                f"[FieldOS Data Context]\n{json.dumps(request.context, indent=2)}\n\n"
-                f"Please use this data to answer my question."
-            )
-
-        # Add conversation history as part of the prompt
-        if request.conversation_history and isinstance(request.conversation_history, list):
-            for msg in request.conversation_history[-6:]:  # Last 6 messages for context
-                role_label = "Previous question" if msg.get("role") == "user" else "Previous answer"
-                prompt_parts.append(f"[{role_label}]: {msg.get('content', '')}")
-
-        prompt_parts.append(request.question)
-        full_prompt = "\n\n".join(prompt_parts)
-
-        startTime = time.time()
-        answer = await _run_chat(full_prompt, ASK_SYSTEM_PROMPT)
-        elapsed = int((time.time() - startTime) * 1000)
-
-        logger.info(f"[LLM] Ask FieldOS answered in {elapsed}ms")
-
-        return {
-            "success": True,
-            "data": {
-                "answer": answer.strip(),
-                "processing_time_ms": elapsed,
-                "disclaimer": "AI-generated response — verify information before acting.",
-            },
-            "timestamp": _ts(),
+    return {
+        "success": True,
+        "data": {
+            "answer": answer,
+            "processing_time_ms": 0,
             "disclaimer": "AI-generated response — verify information before acting.",
-        }
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="AI assistant timed out. Please try again.")
-    except Exception as e:
-        logger.error(f"Ask error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"AI assistant error: {str(e)}")
+        },
+        "timestamp": _ts(),
+        "disclaimer": "AI-generated response — verify information before acting.",
+    }

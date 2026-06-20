@@ -28,7 +28,7 @@ export async function searchClients(queryStr: string): Promise<any[]> {
 
 export async function getClientsByStatus(status: string): Promise<any[]> {
   return query(
-    'SELECT * FROM clients WHERE loan_status = ? AND is_active = 1',
+    'SELECT * FROM clients WHERE status = ? AND is_active = 1',
     [status]
   );
 }

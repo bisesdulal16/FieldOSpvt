@@ -311,3 +311,51 @@ export async function getEODSummary(officerId?: number): Promise<{
     return { success: false, error: err instanceof Error ? err.message : 'Network error' };
   }
 }
+
+/**
+ * Get AI-generated branch summary for the current officer.
+ */
+export async function getBranchSummary(officerId?: number): Promise<{
+  success: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+}> {
+  const { enableMock } = getConfig();
+
+  if (enableMock) {
+    return {
+      success: true,
+      data: {
+        branch_name: 'Kathmandu West Branch',
+        date: new Date().toISOString().split('T')[0],
+        total_clients: 156,
+        active_loans: 142,
+        par_30: 8.2,
+        top_priority_client: 'Sunita Kumari Chaudhary (M-1042)',
+      },
+    };
+  }
+
+  try {
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    const token = getAccessToken();
+    const params = new URLSearchParams();
+    if (officerId) params.set('officer_id', String(officerId));
+    const qs = params.toString() ? `?${params.toString()}` : '';
+
+    const res = await fetch(`${apiUrl}/manager/ai/branch-summary${qs}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    const json = await res.json();
+    if (json.success) {
+      return { success: true, data: json.data };
+    }
+    return { success: false, error: json.detail || 'Failed to fetch branch summary' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+  }
+}

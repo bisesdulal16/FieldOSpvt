@@ -32,7 +32,12 @@
       "Bash(curl -s --connect-timeout 5 http://192.168.1.50:8000/health)",
       "Bash(curl -s --connect-timeout 5 http://localhost:8000/health)",
       "Bash(ipconfig)",
-      "Bash(claude mcp *)"
+      "Bash(claude mcp *)",
+      "Bash(npm info *)",
+      "Bash(npm install *)",
+      "Bash(rm *)",
+      "Bash(npx next *)",
+      "Bash(taskkill *)"
     ]
   }
 }

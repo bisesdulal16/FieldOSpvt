@@ -13,7 +13,7 @@ export async function createMeeting(data: {
   total_members: number;
 }): Promise<number> {
   return insertAndGetId(
-    `INSERT INTO meetings
+    `INSERT INTO center_meetings
        (center_id, center_name, meeting_date, location, officer_id, total_members,
         present_count, paid_count, absent_count, followup_count, collection_received, status)
      VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'in_progress')`,
@@ -39,7 +39,7 @@ export async function updateMeetingProgress(
   }
 ): Promise<void> {
   await mutate(
-    `UPDATE meetings
+    `UPDATE center_meetings
      SET present_count = ?,
          paid_count = ?,
          absent_count = ?,
@@ -59,7 +59,7 @@ export async function updateMeetingProgress(
 
 export async function completeMeeting(id: number, collectionReceived: number): Promise<void> {
   await mutate(
-    `UPDATE meetings
+    `UPDATE center_meetings
      SET status = 'completed',
          collection_received = ?,
          completed_at = datetime('now')
@@ -70,18 +70,18 @@ export async function completeMeeting(id: number, collectionReceived: number): P
 
 export async function saveDraftMeeting(id: number): Promise<void> {
   await mutate(
-    "UPDATE meetings SET status = 'draft' WHERE id = ?",
+    "UPDATE center_meetings SET status = 'draft' WHERE id = ?",
     [id]
   );
 }
 
 export async function getMeetingById(id: number): Promise<any | null> {
-  const rows = await query('SELECT * FROM meetings WHERE id = ?', [id]);
+  const rows = await query('SELECT * FROM center_meetings WHERE id = ?', [id]);
   return rows.length === 0 ? null : rows[0];
 }
 
 export async function getMeetingsByDate(date: string): Promise<any[]> {
-  return query('SELECT * FROM meetings WHERE meeting_date = ?', [date]);
+  return query('SELECT * FROM center_meetings WHERE meeting_date = ?', [date]);
 }
 
 export async function addAttendance(
@@ -91,7 +91,7 @@ export async function addAttendance(
   status: string
 ): Promise<number> {
   return insertAndGetId(
-    `INSERT INTO meeting_attendance (meeting_id, client_id, member_id, status)
+    `INSERT INTO meeting_attendance (meeting_id, client_id, member_id, attendance_status)
      VALUES (?, ?, ?, ?)`,
     [meetingId, clientId, memberId, status]
   );

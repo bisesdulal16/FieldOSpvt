@@ -38,6 +38,8 @@
   "devDependencies": {
     "@types/react": "~19.1.0",
     "babel-preset-expo": "~54.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-expo": "^56.0.4",
     "typescript": "~5.9.0"
   }
 }

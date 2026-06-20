@@ -2600,6 +2600,14 @@ function SecurityOverviewView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <Shield className="h-5 w-5 text-green-600" /> Security Overview
@@ -2710,6 +2718,14 @@ function ThreatModelView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.threats && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <ShieldAlert className="h-5 w-5 text-red-500" /> STRIDE Threat Model
@@ -3022,6 +3038,14 @@ function SecurityAuditExportView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.events && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3141,6 +3165,14 @@ function DeviceManagementView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.devices && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <Smartphone className="h-5 w-5 text-green-600" /> Device Management
@@ -3442,6 +3474,14 @@ function PenTestChecklistView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.items && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <ListChecks className="h-5 w-5 text-green-600" /> Pen Test Checklist
@@ -3550,6 +3590,14 @@ function DependencyScanView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.packages && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3628,6 +3676,14 @@ function APISecurityTestsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.tests && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3697,6 +3753,14 @@ function ComplianceStatusView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3845,6 +3909,14 @@ function PilotOverviewView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800">Pilot Overview
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
@@ -3980,6 +4052,14 @@ function PilotBranchesView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.branches && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800">Branch Readiness</h2>
         <p className="text-sm text-gray-500 mt-1">Track preparation status for all pilot branches</p>
@@ -4103,6 +4183,14 @@ function PilotDocumentsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data || !Array.isArray(data) && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800">Pre-Pilot Documents
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
@@ -4208,6 +4296,14 @@ function PilotTrainingView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.modules && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800">Training Tracker
@@ -4335,6 +4431,14 @@ function PilotMetricsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.kpis && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800">Success Metrics
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
@@ -4469,6 +4573,14 @@ function PilotFeedbackView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+      {!data?.responses && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800">User Feedback
@@ -4644,6 +4756,14 @@ function PilotEscalationsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+      {!data?.escalations && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800">Escalations
@@ -4792,6 +4912,14 @@ function PilotAgreementsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
+                    !data?.agreements && (
+                    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
+                    </div>
+                    </div>
+                    )
       <div>
         <h2 className="text-xl font-bold text-gray-800">Agreements
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
