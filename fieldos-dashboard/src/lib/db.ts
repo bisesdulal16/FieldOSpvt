@@ -1,13 +1,13 @@
-import { PrismaClient } from '@prisma/client'
+/**
+ * FieldOS Dashboard — Database client
+ *
+ * The dashboard communicates with the FastAPI backend via HTTP API.
+ * No direct database connection is needed for pilot phase.
+ */
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
-}
-
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: ['query'],
-  })
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+export const db = {
+  /** Placeholder for future Prisma integration */
+  $queryRaw: async <T extends unknown[]>(_query: TemplateStringsArray, ..._params: unknown[]): Promise<T> => {
+    throw new Error('Direct DB queries not available. Use API endpoints instead.');
+  },
+} as unknown as never;
