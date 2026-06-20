@@ -50,7 +50,18 @@
           "locationPermission": "FieldOS needs location access for visit check-ins."
         }
       ],
-      "expo-llm-mediapipe"
+      "expo-llm-mediapipe",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0"
+          },
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ]
     ],
     "scheme": "fieldos-nepal",
     "extra": {
