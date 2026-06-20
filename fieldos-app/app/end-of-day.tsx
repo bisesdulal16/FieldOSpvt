@@ -12,6 +12,9 @@ import { SecondaryButton } from '../components/fieldos/SecondaryButton';
 import { ValidationError } from '../components/fieldos/ValidationError';
 import { submitEndOfDayReport } from '../services';
 import { getSetting, setSetting } from '../db/repositories/settingsRepo';
+import { getTotalCollectedToday, getCollectionsByDate } from '../db/repositories/collectionsRepo';
+import { getUnsyncedCount } from '../db/repositories/syncQueueRepo';
+import { query } from '../db/database';
 
 const EXCEPTIONS = [
   { label: 'Missing receipt', labelNe: 'रसिद हराइयो', count: 1, icon: 'document-text-outline' as const, color: colors.orange },
@@ -27,6 +30,8 @@ export default function EndOfDayScreen() {
   const [confirmed, setConfirmed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  // Real, locally-computed end-of-day figures
+  const [stats, setStats] = useState({ collected: 0, collections: 0, visits: 0, pending: 0 });
 
   useEffect(() => {
     (async () => {
@@ -39,6 +44,29 @@ export default function EndOfDayScreen() {
       } catch {}
     })();
   }, []);
+
+  // Load today's real activity from the local DB.
+  useEffect(() => {
+    (async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const collected = await getTotalCollectedToday();
+        const todaysCollections = await getCollectionsByDate(today);
+        const visitRows = await query<{ n: number }>(
+          "SELECT COUNT(*) as n FROM visit_checkins WHERE date(checked_in_at) = date('now')"
+        );
+        const pending = await getUnsyncedCount();
+        setStats({
+          collected,
+          collections: todaysCollections.length,
+          visits: visitRows[0]?.n ?? 0,
+          pending,
+        });
+      } catch { /* offline-first: leave zeros */ }
+    })();
+  }, []);
+
+  const formatK = (n: number) => (n >= 1000 ? `NPR ${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K` : `NPR ${n}`);
 
   if (submitted) {
     return (
@@ -70,9 +98,9 @@ export default function EndOfDayScreen() {
         </View>
 
         <View style={styles.grid3}>
-          <SummaryCard label={t('collected')} value="NPR 45K" icon="wallet" color={colors.green} />
-          <SummaryCard label={t('visits')} value="6" icon="people" color={colors.navyLight} />
-          <SummaryCard label={t('pending')} value="3" icon="list" color={colors.orange} />
+          <SummaryCard label={t('collected')} value={formatK(stats.collected)} icon="wallet" color={colors.green} />
+          <SummaryCard label={t('visits')} value={String(stats.visits)} icon="people" color={colors.navyLight} />
+          <SummaryCard label={t('pending')} value={String(stats.pending)} icon="list" color={colors.orange} />
         </View>
 
         <View style={styles.card}>
@@ -96,7 +124,7 @@ export default function EndOfDayScreen() {
           <View style={styles.unsyncedRow}>
             <Ionicons name="cloud-outline" size={14} color={colors.orange} />
             <Text style={styles.unsyncedLabel}>{t('unsyncedRecords')}</Text>
-            <Text style={styles.unsyncedCount}>5</Text>
+            <Text style={styles.unsyncedCount}>{stats.pending}</Text>
           </View>
           <Text style={styles.unsyncedDesc}>
             {t('syncBeforeSubmitting')}
@@ -122,9 +150,9 @@ export default function EndOfDayScreen() {
           // completion view in-place (replaces the form) rather than stacking.
           submitEndOfDayReport({
             reportDate: new Date().toISOString().split('T')[0],
-            totalCollections: 45000,
-            totalVisits: 6,
-            pendingCount: 3,
+            totalCollections: stats.collected,
+            totalVisits: stats.visits,
+            pendingCount: stats.pending,
             exceptions: [],
             isConfirmed: confirmed,
             faceVerified: false,
