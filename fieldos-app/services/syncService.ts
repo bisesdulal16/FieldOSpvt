@@ -133,6 +133,12 @@ function mapEventToBackendPayload(event: SyncQueueEvent): BackendSyncEvent {
     // dashboard filters by it — without this map collections sync with a
     // NULL date and never appear in the manager view.
     capturedAt: 'collected_at',
+    // Visit check-in fields — same NULL-date problem applies to checked_in_at.
+    visitPurpose: 'visit_purpose',
+    checkedInAt: 'checked_in_at',
+    promisedAmount: 'promised_amount',
+    expectedPaymentDate: 'expected_payment_date',
+    outstandingAmount: 'outstanding_amount',
   };
   normalizedData = Object.fromEntries(
     Object.entries(normalizedData).map(([k, v]) => [keyMap[k] || k, v]),
@@ -464,6 +470,10 @@ export async function skipUnsupportedEvents(type: 'end_of_day_report'): Promise<
  * Call this before a pilot demo to clear test artifacts.
  */
 export async function cleanupForDemo(): Promise<{ dismissed: number; skipped: number }> {
-  const dismissed = await cleanupMockFailures();
+  const { dismissAllFailedEvents, clearSyncedEvents } = require('../db/repositories/syncQueueRepo');
+  // Clear ALL failed events (stuck mock/test failures), not just known
+  // patterns, then drop already-synced rows so the queue reads clean.
+  const dismissed = await dismissAllFailedEvents();
+  await clearSyncedEvents();
   return { dismissed, skipped: 0 };
 }

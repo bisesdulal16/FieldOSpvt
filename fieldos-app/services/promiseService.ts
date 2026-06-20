@@ -34,13 +34,15 @@ export async function recordPromiseToPay(
     outstanding_amount: req.outstandingAmount,
   });
 
-  // 2. Enqueue for sync
+  // 2. Enqueue for sync — keys map to the backend's snake_case promise fields
+  // (the backend promise handler has no camelCase fallback).
   await enqueueSyncEvent('promise_to_pay', {
     promiseId: ptpId,
     clientId: req.clientId,
-    amount: req.promisedAmount,
+    promisedAmount: req.promisedAmount,
     reason: req.reason,
-    expectedDate: req.expectedPaymentDate,
+    expectedPaymentDate: req.expectedPaymentDate,
+    outstandingAmount: req.outstandingAmount,
   }, ptpId);
 
   // 3. Audit
