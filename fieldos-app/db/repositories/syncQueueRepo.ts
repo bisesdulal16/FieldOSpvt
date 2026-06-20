@@ -19,6 +19,23 @@ export type SyncQueueEventType =
   | 'kyc_document'
   | 'voice_note';
 
+/**
+ * Map mobile entity types to backend-valid entity types for sync.
+ */
+export function mapEntityTypeToBackend(type: SyncQueueEventType): string {
+  const map: Record<string, string> = {
+    promise_to_pay: 'promise',
+    center_meeting: 'meeting',
+    end_of_day_report: 'eod',
+    visit_checkin: 'visit_checkin',
+    collection: 'collection',
+    audit_event: 'audit_event',
+    kyc_document: 'kyc_document',
+    voice_note: 'voice_note',
+  };
+  return map[type] || type;
+}
+
 export type SyncQueueStatus =
   | 'pending_sync'
   | 'syncing'
@@ -28,6 +45,7 @@ export type SyncQueueStatus =
 export interface SyncQueueEvent {
   id: number;
   type: SyncQueueEventType;
+  operation: string;
   payload: string;
   status: SyncQueueStatus;
   retryCount: number;
@@ -57,6 +75,7 @@ function mapRowToEvent(row: SyncQueueRow): SyncQueueEvent {
   return {
     id: row.id,
     type: row.entity_type as SyncQueueEventType,
+    operation: row.operation,
     payload: row.payload_json,
     status: row.status as SyncQueueStatus,
     retryCount: row.retry_count,
@@ -73,12 +92,14 @@ function mapRowToEvent(row: SyncQueueRow): SyncQueueEvent {
  */
 export async function enqueueSyncEvent(
   type: SyncQueueEventType,
-  payload: any
+  payload: any,
+  entityId?: number
 ): Promise<number> {
+  const eid = entityId ?? 0;
   return insertAndGetId(
     `INSERT INTO sync_queue (entity_type, entity_id, operation, payload_json, status)
-     VALUES (?, 0, 'create', ?, 'pending_sync')`,
-    [type, JSON.stringify(payload)]
+     VALUES (?, ?, 'create', ?, 'pending_sync')`,
+    [type, eid, JSON.stringify(payload)]
   );
 }
 

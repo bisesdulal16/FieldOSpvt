@@ -51,7 +51,7 @@ export async function recordVisitCheckin(
     gps: req.gpsLatitude
       ? { lat: req.gpsLatitude, lng: req.gpsLongitude, accuracy: req.gpsAccuracyMeters }
       : null,
-  });
+  }, checkinId);
 
   // 3. Audit
   await auditVisitCheckin(String(req.clientId), req.visitPurpose);
