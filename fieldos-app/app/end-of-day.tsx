@@ -3,7 +3,6 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-nati
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
-import { useFieldOSStore } from '../store/useFieldOSStore';
 import { useTranslation } from '../i18n';
 import { AppHeader } from '../components/fieldos/AppHeader';
 import { StatusChip } from '../components/fieldos/StatusChip';
@@ -23,7 +22,6 @@ const EXCEPTIONS = [
 ];
 
 export default function EndOfDayScreen() {
-  const { openFaceVerification } = useFieldOSStore();
   const router = useRouter();
   const { t, isNe } = useTranslation();
   const [confirmed, setConfirmed] = useState(false);
@@ -120,7 +118,8 @@ export default function EndOfDayScreen() {
             return;
           }
 
-          // Submit EOD via service layer (local queue + audit)
+          // Submit EOD via service layer (local queue + audit), then show the
+          // completion view in-place (replaces the form) rather than stacking.
           submitEndOfDayReport({
             reportDate: new Date().toISOString().split('T')[0],
             totalCollections: 45000,
@@ -131,8 +130,8 @@ export default function EndOfDayScreen() {
             faceVerified: false,
           }).then(async () => {
             try { await setSetting('eod_submitted_date', new Date().toISOString().split('T')[0], 'string'); } catch {}
-          }).catch(() => {});
-          openFaceVerification('submit-report');
+            setSubmitted(true);
+          }).catch(() => { setSubmitted(true); });
         }} icon="shield">{t('submitMyReport')}</PrimaryButton>
         <View style={styles.actionRow}>
           <SecondaryButton onPress={() => router.back()} icon="save">{t('draft')}</SecondaryButton>
