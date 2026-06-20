@@ -152,7 +152,9 @@ export default function VisitCheckinScreen() {
         gpsAddress: gpsData?.address ?? (gpsDenied ? 'GPS denied' : 'Unknown'),
       });
     } catch (e) { /* silent — offline-first */ }
-    setTimeout(() => router.push('/record-collection'), 2000);
+    // Replace (not push) so we don't stack the collection modal on top of
+    // the visit modal — keeps the flow to a single screen at a time.
+    setTimeout(() => router.replace('/record-collection'), 2000);
   };
 
   return (

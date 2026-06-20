@@ -40,17 +40,21 @@ export async function recordVisitCheckin(
     ],
   );
 
-  // 2. Enqueue for sync
+  // 2. Enqueue for sync — use flat, backend-shaped keys. The backend reads
+  // visit_purpose / gps_* / checked_in_at; without checked_in_at the visit
+  // syncs with a NULL date and is filtered out of the dashboard's today view.
   const user = await getCurrentUser();
   await enqueueSyncEvent('visit_checkin', {
     visitId: checkinId,
     clientId: req.clientId,
     taskId: req.taskId,
     officerId: user?.id || null,
-    purpose: req.visitPurpose,
-    gps: req.gpsLatitude
-      ? { lat: req.gpsLatitude, lng: req.gpsLongitude, accuracy: req.gpsAccuracyMeters }
-      : null,
+    visitPurpose: req.visitPurpose,
+    gpsLatitude: req.gpsLatitude ?? null,
+    gpsLongitude: req.gpsLongitude ?? null,
+    gpsAccuracyMeters: req.gpsAccuracyMeters ?? null,
+    gpsAddress: req.gpsAddress ?? null,
+    checkedInAt: new Date().toISOString(),
   }, checkinId);
 
   // 3. Audit

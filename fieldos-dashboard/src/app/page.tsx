@@ -1119,7 +1119,7 @@ function CollectionView({ enabled }: { enabled: boolean }) {
         <CardContent className="p-4 pt-0">
           <ScrollArea className="max-h-[300px]">
             <DashboardTable
-              headers={['Receipt', 'Client', 'Amount', 'Method', 'Officer', 'CBS']}
+              headers={['Receipt', 'Client', 'Amount', 'Method', 'Officer', 'Time', 'CBS']}
               rows={recent.map((r: any) => [
                 <span key="receipt" className="font-mono text-xs text-gray-500">
                   {r.receipt_id}
@@ -1134,6 +1134,7 @@ function CollectionView({ enabled }: { enabled: boolean }) {
                   {r.method || 'cash'}
                 </span>,
                 <span key="officer" className="text-gray-600">{r.officer_name || '—'}</span>,
+                <span key="time" className="text-gray-500 text-xs whitespace-nowrap">{formatTime(r.collected_at)}</span>,
                 <StatusBadge key="cbs" status={r.cbs_verified ? 'confirmed' : 'pending'} />,
               ])}
               emptyMessage="No collections recorded today"
@@ -5490,7 +5491,7 @@ export default function DashboardPage() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-[#0B1B3A] flex flex-col transition-transform duration-300 ${
+        className={`fixed lg:sticky lg:top-0 inset-y-0 left-0 z-50 w-64 lg:h-screen shrink-0 bg-[#0B1B3A] flex flex-col transition-transform duration-300 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >

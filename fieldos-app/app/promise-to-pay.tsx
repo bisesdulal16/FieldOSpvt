@@ -59,7 +59,10 @@ export default function PromiseToPayScreen() {
             <StatusChip label={t('pendingSync')} variant="sync" />
             <Text style={styles.promiseDetail}>NPR 5,500 — {t('promised')}</Text>
             <View style={styles.successActions}>
-              <PrimaryButton onPress={() => router.push('/tasks')}>{t('returnToTasks')}</PrimaryButton>
+              <PrimaryButton onPress={() => {
+                try { if (router.canDismiss()) router.dismissAll(); } catch { /* no modal */ }
+                router.navigate('/(tabs)/tasks');
+              }}>{t('returnToTasks')}</PrimaryButton>
               <TouchableOpacity onPress={() => router.back()}><Text style={styles.viewClientText}>{t('viewClient')}</Text></TouchableOpacity>
             </View>
           </View>
