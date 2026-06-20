@@ -12,10 +12,13 @@ from app.models.visit_checkin import VisitCheckin
 from app.models.promise_to_pay import PromiseToPay
 from app.models.audit_log import AuditLog
 from app.models.user import User
+from app.models.end_of_day import EndOfDayReport
+from app.models.center_meeting import CenterMeeting
+from app.models.task import TaskAssignment
 
 logger = logging.getLogger(__name__)
 
-VALID_ENTITY_TYPES = {"client", "loan", "collection", "visit", "visit_checkin", "task", "meeting", "promise", "eod", "audit_event", "kyc_document"}
+VALID_ENTITY_TYPES = {"client", "loan", "collection", "visit", "visit_checkin", "task", "meeting", "promise", "eod", "audit_event", "kyc_document", "voice_note"}
 VALID_OPERATIONS = {"create", "update", "delete"}
 
 
@@ -57,7 +60,12 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
                 due_amount=float(payload.get("due_amount", 0)),
                 outstanding_after=float(payload.get("outstanding_after", 0)),
                 payment_method=payload.get("payment_method", "cash"),
-                face_verified=payload.get("face_verified", False),
+                face_verified=bool(payload.get("face_verified", False)),
+                is_high_value=bool(payload.get("is_high_value", False)),
+                gps_latitude=payload.get("gps_latitude"),
+                gps_longitude=payload.get("gps_longitude"),
+                gps_address=payload.get("gps_address"),
+                gps_accuracy_meters=float(payload.get("gps_accuracy_meters")) if payload.get("gps_accuracy_meters") else None,
                 collected_at=payload.get("collected_at"),
             )
             session.add(collection)
@@ -126,8 +134,48 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
             session.add(audit_log)
             await session.flush()
 
-        elif entity_type in ("kyc_document", "eod", "meeting", "task"):
-            # No dedicated handler — store as sync event record
+        elif entity_type == "eod":
+            report = EndOfDayReport(
+                report_date=payload.get("reportDate", payload.get("report_date")),
+                officer_id=payload.get("officerId", payload.get("officer_id")),
+                total_collections=float(payload.get("totalCollections", payload.get("total_collections", 0))),
+                total_visits=int(payload.get("totalVisits", payload.get("total_visits", 0))),
+                pending_count=int(payload.get("pendingCount", payload.get("pending_count", 0))),
+                exceptions_json=payload.get("exceptionsJson", payload.get("exceptions_json")),
+                is_confirmed=bool(payload.get("isConfirmed", payload.get("is_confirmed", False))),
+                is_submitted=bool(payload.get("isSubmitted", payload.get("is_submitted", False))),
+                face_verified=bool(payload.get("faceVerified", payload.get("face_verified", False))),
+            )
+            session.add(report)
+            await session.flush()
+
+        elif entity_type == "meeting":
+            meeting = CenterMeeting(
+                center_id=payload.get("centerId", payload.get("center_id")),
+                center_name=payload.get("centerName", payload.get("center_name")),
+                meeting_date=payload.get("meetingDate", payload.get("meeting_date")),
+                location=payload.get("location"),
+                officer_id=payload.get("officerId", payload.get("officer_id")),
+                total_members=int(payload.get("totalMembers", payload.get("total_members", 0))),
+            )
+            session.add(meeting)
+            await session.flush()
+
+        elif entity_type == "task":
+            task = TaskAssignment(
+                client_id=payload.get("clientId", payload.get("client_id")),
+                user_id=payload.get("userId", payload.get("user_id")),
+                task_type=str(payload.get("taskType", payload.get("task_type", "collection"))),
+                task_date=payload.get("taskDate", payload.get("task_date")),
+                status=str(payload.get("status", "pending")),
+                priority=str(payload.get("priority", "medium")),
+                reason=payload.get("reason"),
+                amount=float(payload.get("amount", 0)) if payload.get("amount") else None,
+            )
+            session.add(task)
+            await session.flush()
+
+        elif entity_type == "kyc_document":
             logger.info(f"Sync create for {entity_type} (stored in sync_events)")
             return {"status": "completed"}
 
