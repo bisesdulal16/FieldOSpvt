@@ -61,6 +61,12 @@ const en = {
 
   // ─── Record Collection ──────────────────────────────────────
   recordCollectionTitle: 'Record Collection',
+  selectClientTitle: 'Select a Client',
+  searchClientPlaceholder: 'Search by name or member ID',
+  noClientsFound: 'No clients found',
+  gpsCapturing: 'Capturing GPS location…',
+  gpsCaptured: 'Location captured for this collection',
+  gpsDeniedShort: 'Location unavailable — tap retry',
   verified: 'Verified',
   dueAmount: 'Due Amount',
   outstanding: 'Outstanding',

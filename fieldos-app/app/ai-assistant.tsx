@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
@@ -16,6 +17,7 @@ import type { ChatMessage, QuickAction } from '../services/aiAssistantService';
 export default function AIAssistantScreen() {
   const router = useRouter();
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
@@ -103,7 +105,11 @@ export default function AIAssistantScreen() {
   // ─── Render ────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+    >
       <AppHeader
         title={t('aiAssistant')}
         leftAction={
@@ -235,7 +241,7 @@ export default function AIAssistantScreen() {
       </ScrollView>
 
       {/* Input Bar */}
-      <View style={styles.inputBar}>
+      <View style={[styles.inputBar, { paddingBottom: insets.bottom + spacing.sm }]}>
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
@@ -266,7 +272,7 @@ export default function AIAssistantScreen() {
           {t('aiAssistantVerify')}
         </Text>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
