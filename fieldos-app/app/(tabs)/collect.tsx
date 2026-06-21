@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
 import { useFieldOSStore } from '../../store/useFieldOSStore';
@@ -9,6 +10,7 @@ import { StatusChip } from '../../components/fieldos/StatusChip';
 import { PrimaryButton } from '../../components/fieldos/PrimaryButton';
 import { ValidationError } from '../../components/fieldos/ValidationError';
 import { recordCollection } from '../../services/collectionService';
+import { fetchClients } from '../../services/clientService';
 import { useTranslation } from '../../i18n';
 
 const PAYMENT_METHODS = [
@@ -32,9 +34,58 @@ export default function RecordCollectionScreen() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Client picker (when opened from the Collect tab without a client chosen)
+  const [clients, setClients] = useState<any[]>([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [gps, setGps] = useState<{ lat: number; lng: number; accuracy: number; address: string } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<'idle' | 'capturing' | 'done' | 'denied'>('idle');
+
+  const loadClients = useCallback(async () => {
+    setClientsLoading(true);
+    try {
+      const res = await fetchClients();
+      if (res.success && Array.isArray(res.data)) setClients(res.data);
+    } catch { /* offline */ } finally { setClientsLoading(false); }
+  }, []);
+
+  // When no client is selected, load the list so the officer can pick one.
+  useEffect(() => { if (!selectedClient) loadClients(); }, [selectedClient, loadClients]);
+
+  // Capture GPS for the collection (called when a client is picked).
+  const captureGps = useCallback(async () => {
+    setGpsStatus('capturing');
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') { setGpsStatus('denied'); return; }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      let address = '';
+      try {
+        const geo = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        const g = geo[0];
+        address = g ? [g.name, g.street, g.city, g.region].filter(Boolean).join(', ') : '';
+      } catch { /* address optional */ }
+      setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: loc.coords.accuracy ?? 0, address });
+      setGpsStatus('done');
+    } catch { setGpsStatus('denied'); }
+  }, []);
+
+  const pickClient = (c: any) => {
+    const due = Number(c.due_amount ?? c.dueAmount ?? 0);
+    setSelectedClient({
+      id: String(c.id ?? c.member_id ?? c.memberId),
+      name: c.name,
+      memberId: c.member_id ?? c.memberId,
+      clientId: c.id ?? c.clientId,
+      dueAmount: due,
+      outstandingBalance: Number(c.outstanding_balance ?? c.outstandingBalance ?? due),
+    } as any);
+    captureGps();
+  };
+
   const client = selectedClient || { id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
-  const dueAmount = selectedClient?.dueAmount || 5500;
-  const outstanding = selectedClient?.outstandingBalance || 45000;
+  const dueAmount = selectedClient?.dueAmount || 0;
+  const outstanding = selectedClient?.outstandingBalance || 0;
   const amount = parseInt(collectionAmount) || 0;
   const isHighValue = amount >= 10000;
 
@@ -101,9 +152,9 @@ export default function RecordCollectionScreen() {
         isHighValue: amt >= 10000,
         taskId: (selectedClient as any)?.taskId,
         faceVerified: false,
-        gpsLatitude: undefined,
-        gpsLongitude: undefined,
-        gpsAccuracyMeters: 10,
+        gpsLatitude: gps?.lat,
+        gpsLongitude: gps?.lng,
+        gpsAccuracyMeters: gps?.accuracy,
       });
       console.log('[Collection] Saved:', result.data?.receiptId);
 
@@ -151,11 +202,62 @@ export default function RecordCollectionScreen() {
 
   const initials = client.name.split(' ').map(n => n[0]).slice(0, 2).join('');
 
+  if (!selectedClient) {
+    const filtered = clients.filter((c: any) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return (c.name || '').toLowerCase().includes(q) || String(c.member_id ?? c.memberId ?? '').toLowerCase().includes(q);
+    });
+    return (
+      <View style={styles.container}>
+        <AppHeader title={t('selectClientTitle')} showBack />
+        <View style={styles.pickerSearchWrap}>
+          <Ionicons name="search" size={16} color={colors.gray400} />
+          <TextInput
+            style={styles.pickerSearch}
+            value={search}
+            onChangeText={setSearch}
+            placeholder={t('searchClientPlaceholder')}
+            placeholderTextColor={colors.gray400}
+          />
+        </View>
+        {clientsLoading ? (
+          <View style={styles.pickerCenter}><ActivityIndicator size="large" color={colors.navy} /></View>
+        ) : (
+          <ScrollView style={styles.body} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+            {filtered.length === 0 ? (
+              <Text style={styles.pickerEmpty}>{t('noClientsFound')}</Text>
+            ) : filtered.map((c: any) => (
+              <TouchableOpacity key={String(c.id ?? c.member_id)} style={styles.pickerRow} onPress={() => pickClient(c)}>
+                <View style={styles.avatar}><Text style={styles.avatarText}>{(c.name || '?').split(' ').map((n: string) => n[0]).slice(0, 2).join('')}</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.clientName}>{c.name}</Text>
+                  <Text style={styles.clientId}>{c.member_id ?? c.memberId} · {t('dueAmount')} NPR {Number(c.due_amount ?? 0).toLocaleString()}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <AppHeader title={t('recordCollectionTitle')} showBack />
 
       <ScrollView style={styles.body} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* GPS status for this collection */}
+        <View style={[styles.gpsBanner, gpsStatus === 'denied' && styles.gpsBannerWarn]}>
+          <Ionicons name={gpsStatus === 'done' ? 'location' : gpsStatus === 'denied' ? 'location-outline' : 'navigate'} size={14} color={gpsStatus === 'denied' ? colors.red : colors.green} />
+          <Text style={styles.gpsBannerText}>
+            {gpsStatus === 'capturing' ? t('gpsCapturing') : gpsStatus === 'done' ? (gps?.address || t('gpsCaptured')) : gpsStatus === 'denied' ? t('gpsDeniedShort') : t('gpsCaptured')}
+          </Text>
+          {gpsStatus === 'denied' && (
+            <TouchableOpacity onPress={captureGps}><Text style={styles.gpsRetry}>{t('retry')}</Text></TouchableOpacity>
+          )}
+        </View>
         <View style={styles.card}>
           <View style={styles.clientRow}>
             <View style={styles.avatar}><Text style={styles.avatarText}>{initials}</Text></View>
@@ -256,6 +358,15 @@ export default function RecordCollectionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  pickerSearchWrap: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.white, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colors.gray200 },
+  pickerSearch: { flex: 1, fontSize: fontSize.base, color: colors.gray800 },
+  pickerCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
+  pickerEmpty: { textAlign: 'center', color: colors.gray400, fontSize: fontSize.base, paddingVertical: 40 },
+  pickerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.white, borderRadius: borderRadius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.gray100 },
+  gpsBanner: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: borderRadius.lg, backgroundColor: colors.greenLight, borderWidth: 1, borderColor: colors.green },
+  gpsBannerWarn: { backgroundColor: colors.orangeLight, borderColor: colors.orange },
+  gpsBannerText: { flex: 1, fontSize: fontSize.sm, color: colors.gray700 },
+  gpsRetry: { fontSize: fontSize.sm, fontWeight: '700', color: colors.navy },
   body: { flex: 1 },
   scrollContent: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.md, paddingBottom: 80 },
   card: { backgroundColor: colors.white, borderRadius: borderRadius.xl, padding: spacing.lg, borderWidth: 1, borderColor: colors.gray100, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
