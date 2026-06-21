@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
@@ -46,6 +46,13 @@ export default function PromiseToPayScreen() {
   const [error, setError] = useState('');
   const client = selectedClient || { id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
   const initials = client.name.split(' ').map(n => n[0]).slice(0, 2).join('');
+  const outstanding = (selectedClient as any)?.outstandingBalance ?? 0;
+  const numericClientId = (selectedClient as any)?.clientId ?? Number(client.id) ?? 0;
+  // Promised amount is entered by the officer; default to the client's due amount.
+  const [promisedAmount, setPromisedAmount] = useState(
+    (selectedClient as any)?.dueAmount ? String((selectedClient as any).dueAmount) : ''
+  );
+  const promisedNum = parseInt(promisedAmount, 10) || 0;
 
   if (confirmed) {
     return (
@@ -57,9 +64,12 @@ export default function PromiseToPayScreen() {
             <Text style={styles.successTitle}>{t('promiseRecorded')}</Text>
             <Text style={styles.successDesc}>{t('reminderHasBeenSet')}</Text>
             <StatusChip label={t('pendingSync')} variant="sync" />
-            <Text style={styles.promiseDetail}>NPR 5,500 — {t('promised')}</Text>
+            <Text style={styles.promiseDetail}>NPR {promisedNum.toLocaleString()} — {t('promised')}</Text>
             <View style={styles.successActions}>
-              <PrimaryButton onPress={() => router.push('/tasks')}>{t('returnToTasks')}</PrimaryButton>
+              <PrimaryButton onPress={() => {
+                try { if (router.canDismiss()) router.dismissAll(); } catch { /* no modal */ }
+                router.navigate('/(tabs)/tasks');
+              }}>{t('returnToTasks')}</PrimaryButton>
               <TouchableOpacity onPress={() => router.back()}><Text style={styles.viewClientText}>{t('viewClient')}</Text></TouchableOpacity>
             </View>
           </View>
@@ -78,12 +88,22 @@ export default function PromiseToPayScreen() {
             <View style={{ flex: 1 }}><Text style={styles.clientName}>{client.name}</Text><Text style={styles.clientMeta}>{client.memberId}</Text></View>
             <StatusChip label={t('overdue')} variant="overdue" />
           </View>
-          <View style={styles.outstandingRow}><Text style={styles.outLabel}>{t('outstanding')}</Text><Text style={styles.outValue}>NPR 45,000</Text></View>
+          <View style={styles.outstandingRow}><Text style={styles.outLabel}>{t('outstanding')}</Text><Text style={styles.outValue}>NPR {outstanding.toLocaleString()}</Text></View>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{t('promisedAmount')}</Text>
-          <View style={styles.amountBox}><Text style={styles.nprLabel}>NPR</Text><Text style={styles.amountText}>5,500</Text></View>
+          <View style={styles.amountBox}>
+            <Text style={styles.nprLabel}>NPR</Text>
+            <TextInput
+              style={styles.amountText}
+              value={promisedAmount}
+              onChangeText={setPromisedAmount}
+              keyboardType="number-pad"
+              placeholder="0"
+              placeholderTextColor={colors.gray300}
+            />
+          </View>
         </View>
 
         <View style={styles.card}>
@@ -122,13 +142,18 @@ export default function PromiseToPayScreen() {
             return;
           }
 
+          if (promisedNum <= 0) {
+            setError(t('collectionAmountRequired'));
+            return;
+          }
+
           try {
             await recordPromiseToPay({
-              clientId: Number(client.id) || 0,
-              promisedAmount: 5500,
+              clientId: numericClientId,
+              promisedAmount: promisedNum,
               expectedPaymentDate: getDateOffset(selectedDate),
               reason: selectedReason || 'other',
-              outstandingAmount: 45000,
+              outstandingAmount: outstanding,
             });
           } catch (e) { /* silent */ }
           setConfirmed(true);

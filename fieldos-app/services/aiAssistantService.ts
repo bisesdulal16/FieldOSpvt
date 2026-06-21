@@ -157,6 +157,19 @@ export async function askFieldOS(
       if (context.todayDate) fieldOSContext.today_date = context.todayDate;
     }
 
+    // Tier 1: on-device Gemma (offline-capable phones).
+    const { onDeviceGenerate } = require('./onDeviceLLM');
+    const ctxStr = Object.keys(fieldOSContext).length ? `Data context: ${JSON.stringify(fieldOSContext)}\n\n` : '';
+    const onDevice = await onDeviceGenerate(
+      `You are FieldOS, an assistant for microfinance field officers in Nepal. Answer in under 4 ` +
+      `sentences. You may suggest and prioritize, but never approve loans, confirm payments, or make ` +
+      `compliance decisions.\n\n${ctxStr}Question: ${question}`,
+    );
+    if (onDevice) {
+      return { success: true, answer: onDevice };
+    }
+
+    // Tier 2: backend (server LLM → heuristic).
     const res = await fetch(`${apiUrl}/voice-ai/ask`, {
       method: 'POST',
       headers: {

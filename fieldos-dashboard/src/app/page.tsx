@@ -736,14 +736,11 @@ function StaffView({ enabled }: { enabled: boolean }) {
     if (!formData.staff_id || !formData.name || !formData.pin) return;
     setSubmitting(true);
     try {
-      const resp = await fetch('/api/fieldos/manager/staff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-      if (!resp.ok) throw new Error('Failed to create staff');
-      const result = await resp.json();
-      setCreatedStaff({ staff_id: result.data.staff_id, pin: result.data.pin });
+      // Use apiMutation so the manager auth token is sent (the manager router
+      // requires it); a raw fetch without the token returned 401.
+      const res = await apiMutation<{ staff_id: string; pin: string }>('manager/staff', 'POST', formData);
+      if (!res.success || !res.data) throw new Error(res.error || 'Failed to create staff');
+      setCreatedStaff({ staff_id: res.data.staff_id, pin: res.data.pin });
       setShowForm(false);
       setFormData({ staff_id: '', name: '', phone_number: '', pin: '' });
       refetch();
@@ -1119,7 +1116,7 @@ function CollectionView({ enabled }: { enabled: boolean }) {
         <CardContent className="p-4 pt-0">
           <ScrollArea className="max-h-[300px]">
             <DashboardTable
-              headers={['Receipt', 'Client', 'Amount', 'Method', 'Officer', 'CBS']}
+              headers={['Receipt', 'Client', 'Amount', 'Method', 'Officer', 'Time', 'CBS']}
               rows={recent.map((r: any) => [
                 <span key="receipt" className="font-mono text-xs text-gray-500">
                   {r.receipt_id}
@@ -1134,6 +1131,7 @@ function CollectionView({ enabled }: { enabled: boolean }) {
                   {r.method || 'cash'}
                 </span>,
                 <span key="officer" className="text-gray-600">{r.officer_name || '—'}</span>,
+                <span key="time" className="text-gray-500 text-xs whitespace-nowrap">{formatTime(r.collected_at)}</span>,
                 <StatusBadge key="cbs" status={r.cbs_verified ? 'confirmed' : 'pending'} />,
               ])}
               emptyMessage="No collections recorded today"
@@ -2600,14 +2598,14 @@ function SecurityOverviewView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data && (
+                    {!data && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <Shield className="h-5 w-5 text-green-600" /> Security Overview
@@ -2718,14 +2716,14 @@ function ThreatModelView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.threats && (
+                    {!data?.threats && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <ShieldAlert className="h-5 w-5 text-red-500" /> STRIDE Threat Model
@@ -3038,14 +3036,14 @@ function SecurityAuditExportView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.events && (
+                    {!data?.events && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3165,14 +3163,14 @@ function DeviceManagementView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.devices && (
+                    {!data?.devices && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <Smartphone className="h-5 w-5 text-green-600" /> Device Management
@@ -3474,14 +3472,14 @@ function PenTestChecklistView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.items && (
+                    {!data?.items && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <ListChecks className="h-5 w-5 text-green-600" /> Pen Test Checklist
@@ -3590,14 +3588,14 @@ function DependencyScanView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.packages && (
+                    {!data?.packages && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3676,14 +3674,14 @@ function APISecurityTestsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.tests && (
+                    {!data?.tests && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3753,14 +3751,14 @@ function ComplianceStatusView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data && (
+                    {!data && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -3909,14 +3907,14 @@ function PilotOverviewView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data && (
+                    {!data && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800">Pilot Overview
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
@@ -4052,14 +4050,14 @@ function PilotBranchesView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.branches && (
+                    {!data?.branches && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800">Branch Readiness</h2>
         <p className="text-sm text-gray-500 mt-1">Track preparation status for all pilot branches</p>
@@ -4183,14 +4181,14 @@ function PilotDocumentsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data || !Array.isArray(data) && (
+                    {!data || !Array.isArray(data) && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800">Pre-Pilot Documents
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
@@ -4296,14 +4294,14 @@ function PilotTrainingView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.modules && (
+                    {!data?.modules && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800">Training Tracker
@@ -4431,14 +4429,14 @@ function PilotMetricsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.kpis && (
+                    {!data?.kpis && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800">Success Metrics
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
@@ -4912,14 +4910,14 @@ function PilotAgreementsView({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="space-y-6">
-                    !data?.agreements && (
+                    {!data?.agreements && (
                     <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="text-sm font-medium text-amber-800">Fallback demo data shown &mdash; backend unavailable.</span>
                     </div>
                     </div>
-                    )
+                    )}
       <div>
         <h2 className="text-xl font-bold text-gray-800">Agreements
           <Badge variant="secondary" className="ml-2 text-xs bg-blue-100 text-blue-800">Pilot Reference</Badge>
@@ -5479,7 +5477,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-gray-50">
+    <div className="h-screen overflow-hidden flex bg-gray-50">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -5490,7 +5488,7 @@ export default function DashboardPage() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-[#0B1B3A] flex flex-col transition-transform duration-300 ${
+        className={`fixed lg:sticky lg:top-0 inset-y-0 left-0 z-50 w-64 lg:h-screen shrink-0 bg-[#0B1B3A] flex flex-col transition-transform duration-300 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
@@ -5514,7 +5512,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Nav Items */}
-        <ScrollArea className="flex-1 px-3 py-4">
+        <ScrollArea className="flex-1 min-h-0 px-3 py-4">
           <nav className="space-y-1">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">Operations</p>
             {NAV_ITEMS.map((item) => {
@@ -5661,7 +5659,7 @@ export default function DashboardPage() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0">
+      <main className="flex-1 min-w-0 h-screen overflow-y-auto">
         {/* Top Bar */}
         <header className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 lg:px-6 py-3">
           <div className="flex items-center justify-between">

@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0B1B3A"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "np.fieldos.app"
@@ -22,7 +24,15 @@
         "backgroundColor": "#0B1B3A"
       },
       "package": "np.fieldos.app",
-      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -39,8 +49,27 @@
         {
           "locationPermission": "FieldOS needs location access for visit check-ins."
         }
+      ],
+      "expo-llm-mediapipe",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0"
+          },
+          "android": {
+            "minSdkVersion": 24,
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
-    "scheme": "fieldos-nepal"
+    "scheme": "fieldos-nepal",
+    "extra": {
+      "eas": {
+        "projectId": "24b312d2-0f5c-4d91-bf67-e3c7a34ff221"
+      }
+    },
+    "owner": "bisesdulal16"
   }
 }

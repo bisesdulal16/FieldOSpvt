@@ -42,6 +42,14 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables created/verified.")
+    # Pre-warm the local LLM (Ollama) in the background so the first voice/ask
+    # request is fast. No-op if Ollama is not running.
+    try:
+        import threading
+        from app.routers.voice_ai import prewarm_ollama
+        threading.Thread(target=prewarm_ollama, daemon=True).start()
+    except Exception as e:
+        logger.warning(f"Ollama pre-warm skipped: {e}")
     yield
     logger.info("FieldOS Nepal backend shutting down...")
     await engine.dispose()

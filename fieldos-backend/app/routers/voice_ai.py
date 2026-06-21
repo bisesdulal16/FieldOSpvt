@@ -17,8 +17,11 @@ Human Review: All output requires officer review before saving.
 import asyncio
 import json
 import logging
+import os
 import re
 import time
+import urllib.request
+import urllib.error
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Any
@@ -29,6 +32,56 @@ router = APIRouter(prefix="/voice-ai", tags=["Voice AI"])
 
 def _ts() -> int:
     return int(time.time())
+
+
+# ─── Local LLM (Ollama) with heuristic fallback ──────────────────
+# Set OLLAMA_URL / OLLAMA_MODEL in the backend .env. If Ollama is
+# unreachable, every endpoint falls back to the rule-based functions so the
+# pilot never breaks when the model server is down.
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:latest")
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "20"))
+
+
+def _ollama_generate(prompt: str, system: str | None = None) -> str | None:
+    """Call a local Ollama model. Returns the text, or None on any failure."""
+    try:
+        body = {
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "system": system or "",
+            "stream": False,
+            "keep_alive": "30m",  # keep the model resident between requests
+            "options": {"temperature": 0.2},
+        }
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/generate",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as r:
+            data = json.loads(r.read().decode())
+        text = (data.get("response") or "").strip()
+        return text or None
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+        logger.warning(f"Ollama unavailable, using heuristic fallback: {e}")
+        return None
+
+
+async def _llm(prompt: str, system: str | None = None) -> str | None:
+    """Async wrapper so the blocking HTTP call doesn't stall the event loop."""
+    return await asyncio.to_thread(_ollama_generate, prompt, system)
+
+
+def prewarm_ollama() -> None:
+    """Load the model into memory once at startup so the first real request is
+    fast. Safe no-op if Ollama is down. Call from a background thread."""
+    try:
+        _ollama_generate("ok", system="Reply with one word.")
+        logger.info(f"Ollama model '{OLLAMA_MODEL}' pre-warmed")
+    except Exception:
+        pass
 
 
 # ─── Request/Response Models ─────────────────────────────────────
@@ -161,14 +214,24 @@ async def transcribe_audio(request: TranscribeRequest):
 
 @router.post("/cleanup")
 async def cleanup_text(request: CleanupRequest):
-    """Clean up voice-to-text text using local heuristic rules."""
-    cleaned = _cleanup_text(request.text, request.language)
+    """Clean up voice-to-text via local LLM, falling back to heuristic rules."""
+    lang_name = "Nepali" if (request.language or "ne").startswith("ne") else "English"
+    llm = await _llm(
+        prompt=f"Clean up this field-visit voice note. Fix grammar and remove filler "
+               f"words, keep the original {lang_name} language and meaning, return only "
+               f"the cleaned note:\n\n{request.text}",
+        system="You are a careful transcription editor for a microfinance field app. "
+               "Never invent facts; only clean what is written.",
+    )
+    cleaned = llm or _cleanup_text(request.text, request.language)
+    engine = "llm" if llm else "heuristic"
 
     return {
         "success": True,
         "data": {
             "original": request.text,
             "cleaned": cleaned,
+            "engine": engine,
             "processing_time_ms": 0,
         },
         "timestamp": _ts(),
@@ -180,17 +243,27 @@ async def cleanup_text(request: CleanupRequest):
 
 @router.post("/summary")
 async def generate_visit_summary(request: VisitSummaryRequest):
-    """Generate a visit summary using template + notes analysis."""
-    summary = _generate_summary(
-        request.notes,
-        request.client_name,
-        request.visit_purpose,
+    """Summarize a visit via local LLM, falling back to a template."""
+    ctx = []
+    if request.client_name:
+        ctx.append(f"Client: {request.client_name}")
+    if request.visit_purpose:
+        ctx.append(f"Purpose: {request.visit_purpose}")
+    ctx_str = ("\n".join(ctx) + "\n\n") if ctx else ""
+    llm = await _llm(
+        prompt=f"{ctx_str}Summarize these microfinance field-visit notes into 3-5 short "
+               f"bullet points an officer and branch manager can scan. Keep facts exactly "
+               f"as written; do not add amounts or promises that aren't stated:\n\n{request.notes}",
+        system="You summarize microfinance field visits factually and concisely.",
     )
+    summary = llm or _generate_summary(request.notes, request.client_name, request.visit_purpose)
+    engine = "llm" if llm else "heuristic"
 
     return {
         "success": True,
         "data": {
             "summary": summary,
+            "engine": engine,
             "processing_time_ms": 0,
             "disclaimer": "AI-generated summary — officer must review before saving.",
         },
@@ -203,17 +276,25 @@ async def generate_visit_summary(request: VisitSummaryRequest):
 
 @router.post("/ask")
 async def ask_fieldos(request: AskRequest):
-    """'Ask FieldOS' AI assistant using rule-based logic."""
-    answer = _generate_answer(
-        request.question,
-        request.context,
-        request.conversation_history,
+    """'Ask FieldOS' assistant via local LLM, falling back to rule-based answers."""
+    ctx_str = ""
+    if request.context:
+        ctx_str = "Current data context (use it in your answer):\n" + json.dumps(request.context) + "\n\n"
+    llm = await _llm(
+        prompt=f"{ctx_str}Field officer question: {request.question}",
+        system="You are FieldOS, an assistant for microfinance field officers in Nepal. "
+               "Give short, practical answers about collections, visits, PAR and promises-to-pay. "
+               "You may suggest and prioritize, but never approve loans, confirm payments, or make "
+               "compliance decisions. Keep it under 4 sentences.",
     )
+    answer = llm or _generate_answer(request.question, request.context, request.conversation_history)
+    engine = "llm" if llm else "heuristic"
 
     return {
         "success": True,
         "data": {
             "answer": answer,
+            "engine": engine,
             "processing_time_ms": 0,
             "disclaimer": "AI-generated response — verify information before acting.",
         },

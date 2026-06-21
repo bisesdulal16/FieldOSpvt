@@ -310,6 +310,22 @@ export async function dismissFailedEvents(patterns: string[]): Promise<number> {
 }
 
 /**
+ * Dismiss ALL failed events (mark them synced). Used by the demo-cleanup
+ * action to clear stuck/test failures regardless of their error text.
+ * Real records also persist in their own tables, so this only clears the queue.
+ */
+export async function dismissAllFailedEvents(): Promise<number> {
+  const rows = await query<SyncQueueRow>("SELECT id FROM sync_queue WHERE status = 'failed'");
+  if (rows.length === 0) return 0;
+  await mutate(
+    `UPDATE sync_queue SET status = 'synced', synced_at = datetime('now','localtime'),
+     last_error = 'Dismissed (demo cleanup)', updated_at = datetime('now','localtime')
+     WHERE status = 'failed'`
+  );
+  return rows.length;
+}
+
+/**
  * Mark all events of a given type as synced (skip/unsupported).
  * Used for event types that the backend doesn't yet support (e.g., EOD report sync).
  */

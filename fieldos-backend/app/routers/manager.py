@@ -355,16 +355,20 @@ async def get_visits(
     try:
         today = _today_str()
 
-        # Get visits with officer name (via task or direct officer_id) and client name
+        # Officer resolved from VisitCheckin.officer_id (sent on every check-in),
+        # falling back to the assigned task's officer for legacy rows.
+        direct_officer = aliased(User)
+        task_officer = aliased(User)
         stmt = (
             select(
                 VisitCheckin,
-                User.name.label("officer_name"),
+                func.coalesce(direct_officer.name, task_officer.name).label("officer_name"),
                 Client.name.label("client_name"),
                 Client.member_id.label("member_id"),
             )
+            .outerjoin(direct_officer, VisitCheckin.officer_id == direct_officer.id)
             .outerjoin(TaskAssignment, VisitCheckin.task_id == TaskAssignment.id)
-            .outerjoin(User, TaskAssignment.user_id == User.id)
+            .outerjoin(task_officer, TaskAssignment.user_id == task_officer.id)
             .outerjoin(Client, VisitCheckin.client_id == Client.id)
             .where(VisitCheckin.checked_in_at.like(f"{today}%"))
             .order_by(VisitCheckin.checked_in_at.desc())
@@ -372,25 +376,6 @@ async def get_visits(
         )
         result = await db.execute(stmt)
         rows = result.all()
-
-        # Also get visits with officer_id but no task_id (missing from above query)
-        if rows:
-            visited_ids = {r[0].id for r in rows}
-            unlinked_result = await db.execute(
-                select(VisitCheckin, User.name.label("officer_name"), Client.name.label("client_name"), Client.member_id.label("member_id"))
-                .outerjoin(User, VisitCheckin.officer_id == User.id)
-                .outerjoin(Client, VisitCheckin.client_id == Client.id)
-                .where(and_(
-                    VisitCheckin.checked_in_at.like(f"{today}%"),
-                    VisitCheckin.officer_id.isnot(None),
-                    VisitCheckin.task_id.is_(None),
-                    VisitCheckin.id.not_in(list(visited_ids)),
-                ))
-                .order_by(VisitCheckin.checked_in_at.desc())
-                .limit(limit)
-            )
-            for row in unlinked_result.all():
-                rows.append(row)
 
         visits_data = []
         for visit, officer_name, client_name, member_id in rows:

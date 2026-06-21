@@ -61,6 +61,12 @@ const en = {
 
   // ─── Record Collection ──────────────────────────────────────
   recordCollectionTitle: 'Record Collection',
+  selectClientTitle: 'Select a Client',
+  searchClientPlaceholder: 'Search by name or member ID',
+  noClientsFound: 'No clients found',
+  gpsCapturing: 'Capturing GPS location…',
+  gpsCaptured: 'Location captured for this collection',
+  gpsDeniedShort: 'Location unavailable — tap retry',
   verified: 'Verified',
   dueAmount: 'Due Amount',
   outstanding: 'Outstanding',
@@ -177,6 +183,10 @@ const en = {
   // ─── Visit Check-in ─────────────────────────────────────────
   visitCheckin: 'Visit Check-in',
   checkinSuccessful: 'Check-in Successful!',
+  visitOutcomeTitle: 'What happened on this visit?',
+  outcomeCollect: 'Record Collection',
+  outcomePromise: 'Promise to Pay',
+  outcomeNoneDone: 'No payment — done',
   officialVisitRecorded: 'Official visit has been recorded',
   gpsLogged: 'GPS logged',
   visitPurpose: 'Visit Purpose',

@@ -135,19 +135,26 @@ async function trySyncToServer(req: CreateCollectionRequest, collectionId: numbe
       gps_latitude: req.gpsLatitude,
       gps_longitude: req.gpsLongitude,
       gps_accuracy_meters: req.gpsAccuracyMeters,
+      collected_at: new Date().toISOString(),
       receipt_id: receiptId,
     };
 
     console.log('[Collection Direct Sync] backend payload:', JSON.stringify(backendPayload, null, 2));
 
-    const response = await fetch(`${apiUrl}/collections`, {
+    // Bound the request so a slow/unreachable server can never freeze the
+    // collect screen — on timeout we fall back to the offline queue.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const response = await fetch(`${apiUrl}/collections/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': token ? `Bearer ${token}` : 'Bearer undefined',
       },
       body: JSON.stringify(backendPayload),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const responseText = await response.text();
     console.log('[Collection Direct Sync] response status:', response.status, 'body:', responseText?.substring(0, 500));

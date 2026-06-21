@@ -4,9 +4,9 @@
  * Handles promise-to-pay creation: local persist → sync queue → audit → server.
  */
 
-import { getConfig } from './apiClient';
+import { getConfig, getAccessToken } from './apiClient';
 import { createPromise } from '../db/repositories/promiseToPayRepo';
-import { enqueueSyncEvent } from '../db/repositories/syncQueueRepo';
+import { enqueueSyncEvent, markEventSynced } from '../db/repositories/syncQueueRepo';
 import { auditPromiseToPayCreated } from './auditService';
 import type {
   CreatePromiseToPayRequest,
@@ -34,17 +34,25 @@ export async function recordPromiseToPay(
     outstanding_amount: req.outstandingAmount,
   });
 
-  // 2. Enqueue for sync
-  await enqueueSyncEvent('promise_to_pay', {
+  // 2. Enqueue for sync — keys map to the backend's snake_case promise fields
+  // (the backend promise handler has no camelCase fallback).
+  const queueEventId = await enqueueSyncEvent('promise_to_pay', {
     promiseId: ptpId,
     clientId: req.clientId,
-    amount: req.promisedAmount,
+    promisedAmount: req.promisedAmount,
     reason: req.reason,
-    expectedDate: req.expectedPaymentDate,
+    expectedPaymentDate: req.expectedPaymentDate,
+    outstandingAmount: req.outstandingAmount,
   }, ptpId);
 
   // 3. Audit
   await auditPromiseToPayCreated(String(req.clientId), req.promisedAmount, req.reason);
+
+  // 3b. Best-effort direct sync so the PTP reaches the dashboard immediately.
+  if (!enableMock) {
+    const synced = await trySyncPtpToServer(req);
+    if (synced) { try { await markEventSynced(queueEventId); } catch { /* keep queued */ } }
+  }
 
   // 4. Return immediately
   if (enableMock) {
@@ -63,6 +71,31 @@ export async function recordPromiseToPay(
 }
 
 // ─── Internal ────────────────────────────────────────────────────
+
+async function trySyncPtpToServer(req: CreatePromiseToPayRequest): Promise<boolean> {
+  try {
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    const token = getAccessToken();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch(`${apiUrl}/promise-to-pay/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({
+        client_id: req.clientId,
+        promised_amount: req.promisedAmount,
+        expected_payment_date: req.expectedPaymentDate,
+        reason: req.reason,
+        outstanding_amount: req.outstandingAmount,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

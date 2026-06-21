@@ -42,8 +42,19 @@ export default function ClientDetailScreen() {
   const clientId = Number(client.id) || 1;
   const initials = (client.name || '').split(' ').map(n => n[0]).slice(0, 2).join('');
 
+  const numericClientId = (selectedClient as any)?.clientId ?? clientId;
+
   const [kycSummary, setKycSummary] = useState<Record<KycDocumentType, KycDocument | null>>({} as any);
   const [kycLoading, setKycLoading] = useState(true);
+  const [lastPayment, setLastPayment] = useState<{ amount: number; at: string } | null>(null);
+
+  const loadLastPayment = useCallback(async () => {
+    try {
+      const { getLatestCollectionByClient } = require('../db/repositories/collectionsRepo');
+      const row = await getLatestCollectionByClient(numericClientId);
+      if (row) setLastPayment({ amount: row.amount, at: row.collected_at });
+    } catch { /* offline-first: leave as null */ }
+  }, [numericClientId]);
 
   const loadKyc = useCallback(async () => {
     try {
@@ -58,10 +69,17 @@ export default function ClientDetailScreen() {
 
   useEffect(() => { loadKyc(); }, [loadKyc]);
 
-  // Refresh KYC when screen comes back into focus
+  // Refresh KYC + last payment when screen comes back into focus
   useFocusEffect(
-    useCallback(() => { loadKyc(); }, [loadKyc])
+    useCallback(() => { loadKyc(); loadLastPayment(); }, [loadKyc, loadLastPayment])
   );
+
+  const lastPaymentLabel = (() => {
+    if (!lastPayment) return '—';
+    const days = Math.floor((Date.now() - new Date(lastPayment.at).getTime()) / 86400000);
+    const rel = days <= 0 ? t('today') : `${days}d ago`;
+    return `NPR ${Number(lastPayment.amount).toLocaleString()} · ${rel}`;
+  })();
 
   const completedKyc = KYC_TYPES.filter(dt => kycSummary[dt.type]).length;
   const totalKyc = KYC_TYPES.length;
@@ -98,7 +116,7 @@ export default function ClientDetailScreen() {
           <Text style={styles.cardTitle}>{t('loanSummary')}</Text>
           <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('dueAmount')}</Text><Text style={styles.loanDue}>NPR {(selectedClient?.dueAmount || 5500).toLocaleString()}</Text></View>
           <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('outstandingBalance')}</Text><Text style={styles.loanValue}>NPR {(selectedClient?.outstandingBalance || 45000).toLocaleString()}</Text></View>
-          <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('lastPayment')}</Text><Text style={styles.loanValue}>NPR 2,500 · 28d ago</Text></View>
+          <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('lastPayment')}</Text><Text style={styles.loanValue}>{lastPaymentLabel}</Text></View>
           <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('nextInstallment')}</Text><Text style={styles.loanValue}>{t('today')}</Text></View>
           <View style={styles.divider} />
           <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('overduePar')}</Text><StatusChip label={t('overdue')} variant="overdue" /></View>

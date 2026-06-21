@@ -72,15 +72,15 @@ export const spacing = {
 } as const;
 
 export const fontSize = {
-  xs: 9,
-  sm: 10,
-  base: 11,
-  md: 12,
-  lg: 14,
-  xl: 16,
-  '2xl': 18,
-  '3xl': 20,
-  '4xl': 24,
+  xs: 11,
+  sm: 12,
+  base: 13,
+  md: 14,
+  lg: 16,
+  xl: 18,
+  '2xl': 20,
+  '3xl': 22,
+  '4xl': 26,
 } as const;
 
 export const borderRadius = {
