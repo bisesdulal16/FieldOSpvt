@@ -5480,7 +5480,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-gray-50">
+    <div className="h-screen overflow-hidden flex bg-gray-50">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -5515,7 +5515,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Nav Items */}
-        <ScrollArea className="flex-1 px-3 py-4">
+        <ScrollArea className="flex-1 min-h-0 px-3 py-4">
           <nav className="space-y-1">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">Operations</p>
             {NAV_ITEMS.map((item) => {
@@ -5662,7 +5662,7 @@ export default function DashboardPage() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0">
+      <main className="flex-1 min-w-0 h-screen overflow-y-auto">
         {/* Top Bar */}
         <header className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 lg:px-6 py-3">
           <div className="flex items-center justify-between">
