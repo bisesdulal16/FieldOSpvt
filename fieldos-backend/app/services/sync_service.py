@@ -175,7 +175,9 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
             session.add(task)
             await session.flush()
 
-        elif entity_type == "kyc_document":
+        elif entity_type in ("kyc_document", "voice_note"):
+            # Acknowledged and retained in sync_events; no dedicated server
+            # table yet. Ack so the device stops marking it failed.
             logger.info(f"Sync create for {entity_type} (stored in sync_events)")
             return {"status": "completed"}
 

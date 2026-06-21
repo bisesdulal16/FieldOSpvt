@@ -52,6 +52,15 @@ export async function getCollectionByReceiptId(receiptId: string): Promise<any |
   return rows.length === 0 ? null : rows[0];
 }
 
+/** Most recent collection recorded for a client (local, offline-first). */
+export async function getLatestCollectionByClient(clientId: number): Promise<any | null> {
+  const rows = await query(
+    'SELECT * FROM collections WHERE client_id = ? ORDER BY collected_at DESC LIMIT 1',
+    [clientId]
+  );
+  return rows.length === 0 ? null : rows[0];
+}
+
 export async function getPendingSyncCollections(): Promise<any[]> {
   return query("SELECT * FROM collections WHERE sync_status = 'pending'");
 }

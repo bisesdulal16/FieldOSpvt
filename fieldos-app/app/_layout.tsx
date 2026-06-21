@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { FaceVerificationModal } from '../components/fieldos/FaceVerificationModal';
+import { OnDeviceLLMProvider } from '../components/OnDeviceLLMProvider';
 import { useInitDB } from '../hooks/useInitDB';
 
 export default function RootLayout() {
@@ -20,6 +21,7 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
+      <OnDeviceLLMProvider>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -94,6 +96,7 @@ export default function RootLayout() {
         />
       </Stack>
       <FaceVerificationModal />
+      </OnDeviceLLMProvider>
     </SafeAreaProvider>
   );
 }

@@ -8,51 +8,58 @@ import { StatusChip } from '../../components/fieldos/StatusChip';
 import { PrimaryButton } from '../../components/fieldos/PrimaryButton';
 import { SecondaryButton } from '../../components/fieldos/SecondaryButton';
 import { initCenterMeeting, completeCenterMeeting, saveMeetingDraft as saveDraftService } from '../../services';
+import { getAllClients } from '../../db/repositories/clientsRepo';
+import { getCurrentUser } from '../../services/authService';
 import { useTranslation } from '../../i18n';
 
-const MEMBERS = [
-  { name: 'Sunita Kumari Chaudhary', id: 'M-1042', status: 'present' as const },
-  { name: 'Rita Maya Tamang', id: 'M-1056', status: 'present' as const },
-  { name: 'Gita Kumari Gupta', id: 'M-1123', status: 'paid' as const },
-  { name: 'Sita Devi Sah', id: 'M-1089', status: 'absent' as const },
-  { name: 'Maya Devi Shrestha', id: 'M-1115', status: 'present' as const },
-  { name: 'Kamala Rai', id: 'M-1035', status: 'paid' as const },
-  { name: 'Bishnu Maya Kami', id: 'M-1048', status: 'follow-up' as const },
-  { name: 'Anita Maharjan', id: 'M-1067', status: 'present' as const },
-  { name: 'Sarita Tharu', id: 'M-1079', status: 'follow-up' as const },
-  { name: 'Nirmala Devi Pun', id: 'M-1091', status: 'paid' as const },
-  { name: 'Laxmi Poudel', id: 'M-1098', status: 'absent' as const },
-  { name: 'Padma Kumari BK', id: 'M-1105', status: 'present' as const },
-  { name: 'Hari Maya Damai', id: 'M-1112', status: 'follow-up' as const },
-  { name: 'Sushila Tamang', id: 'M-1119', status: 'present' as const },
-];
+type MeetingMember = { clientId: number; name: string; memberId: string; due: number };
 
 export default function CenterMeetingScreen() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [memberStatuses, setMemberStatuses] = useState(
-    Object.fromEntries(MEMBERS.map(m => [m.id, m.status]))
-  );
+  const [members, setMembers] = useState<MeetingMember[]>([]);
+  const [center, setCenter] = useState<{ id: string; name: string }>({ id: '', name: '' });
+  const [memberStatuses, setMemberStatuses] = useState<Record<string, 'present' | 'paid' | 'absent' | 'follow-up'>>({});
   const [completed, setCompleted] = useState(false);
   const [meetingId, setMeetingId] = useState<number | null>(null);
 
+  // Load the real group roster: active clients grouped by center; use the
+  // officer's largest center as the meeting's group.
   useEffect(() => {
-    if (!meetingId) {
-      (async () => {
-        try {
-          const id = await initCenterMeeting({
-            centerId: 204,
-            centerName: 'Kalika Women Center',
-            meetingDate: new Date().toISOString().split('T')[0],
-            location: 'Ward 5, Kalanki',
-            officerId: 208,
-            totalMembers: MEMBERS.length,
-          });
-          setMeetingId(id);
-        } catch (e) { /* silent */ }
-      })();
-    }
-  }, [meetingId]);
+    (async () => {
+      try {
+        const all = await getAllClients();
+        const active = all.filter((c: any) => (c.status ?? 'active') === 'active');
+        const byCenter: Record<string, any[]> = {};
+        for (const c of active) {
+          const key = c.center_name || 'Center';
+          (byCenter[key] = byCenter[key] || []).push(c);
+        }
+        const topCenter = Object.entries(byCenter).sort((a, b) => b[1].length - a[1].length)[0];
+        const group = topCenter ? topCenter[1] : active;
+        const roster: MeetingMember[] = group.map((c: any) => ({
+          clientId: c.id,
+          name: c.name,
+          memberId: c.member_id,
+          due: Number(c.due_amount || 0),
+        }));
+        setMembers(roster);
+        setCenter({ id: String(group[0]?.center_id ?? ''), name: group[0]?.center_name || t('centerMeeting') });
+        setMemberStatuses(Object.fromEntries(roster.map(m => [m.memberId, 'present' as const])));
+
+        const user = await getCurrentUser();
+        const id = await initCenterMeeting({
+          centerId: Number(group[0]?.center_id) || 0,
+          centerName: group[0]?.center_name || 'Center',
+          meetingDate: new Date().toISOString().split('T')[0],
+          location: group[0]?.center_name || '',
+          officerId: user?.id ?? 0,
+          totalMembers: roster.length,
+        });
+        setMeetingId(id);
+      } catch (e) { /* offline-first: silent */ }
+    })();
+  }, [t]);
 
   const updateStatus = (id: string, status: string) => {
     setMemberStatuses(prev => ({ ...prev, [id]: status as typeof prev[string] }));
@@ -70,7 +77,11 @@ export default function CenterMeetingScreen() {
   const presentCount = stats.filter(s => s === 'present').length;
   const paidCount = stats.filter(s => s === 'paid').length;
   const followupCount = stats.filter(s => s === 'follow-up').length;
-  const totalCount = stats.length;
+  const totalCount = members.length;
+  // Real money figures: expected = sum of all dues; received = dues of paid members.
+  const expectedNpr = members.reduce((a, m) => a + m.due, 0);
+  const receivedNpr = members.reduce((a, m) => a + (memberStatuses[m.memberId] === 'paid' ? m.due : 0), 0);
+  const fmtK = (n: number) => (n >= 1000 ? `NPR ${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K` : `NPR ${n}`);
 
   const getStatusLabel = (s: string) => {
     if (s === 'present') return 'P';
@@ -110,14 +121,13 @@ export default function CenterMeetingScreen() {
           <>
             <View style={styles.card}>
               <View style={styles.centerHeader}>
-                <Text style={styles.centerName}>{t('kalikaWomenCenter')}</Text>
+                <Text style={styles.centerName}>{center.name}</Text>
                 <StatusChip label={t('inProgress')} variant="info" />
               </View>
               <View style={styles.centerMeta}>
-                <View style={styles.metaItem}><Ionicons name="calendar-outline" size={10} color={colors.gray500} /><Text style={styles.metaText}>{t('dec102024')}</Text></View>
-                <View style={styles.metaItem}><Ionicons name="location-outline" size={10} color={colors.gray500} /><Text style={styles.metaText}>{t('ward5Kalanki')}</Text></View>
-                <View style={styles.metaItem}><Ionicons name="people-outline" size={10} color={colors.gray500} /><Text style={styles.metaText}>CC-204</Text></View>
-                <View style={styles.metaItem}><Ionicons name="person-outline" size={10} color={colors.gray500} /><Text style={styles.metaText}>FO-208</Text></View>
+                <View style={styles.metaItem}><Ionicons name="calendar-outline" size={10} color={colors.gray500} /><Text style={styles.metaText}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text></View>
+                <View style={styles.metaItem}><Ionicons name="location-outline" size={10} color={colors.gray500} /><Text style={styles.metaText}>{center.name}</Text></View>
+                <View style={styles.metaItem}><Ionicons name="people-outline" size={10} color={colors.gray500} /><Text style={styles.metaText}>{totalCount} {t('members')}</Text></View>
               </View>
             </View>
 
@@ -128,8 +138,8 @@ export default function CenterMeetingScreen() {
               </View>
               <View style={styles.progressGrid}>
                 <View style={[styles.progressBox, { backgroundColor: colors.greenLight }]}><Text style={[styles.progressValue, { color: colors.green }]}>{presentCount + paidCount}/{totalCount}</Text><Text style={styles.progressLabel}>{t('attendance')}</Text></View>
-                <View style={[styles.progressBox, { backgroundColor: colors.navyBg }]}><Text style={[styles.progressValue, { color: colors.navy }]}>NPR 68K</Text><Text style={styles.progressLabel}>{t('expected')}</Text></View>
-                <View style={[styles.progressBox, { backgroundColor: colors.greenLight }]}><Text style={[styles.progressValue, { color: colors.green }]}>NPR 42K</Text><Text style={styles.progressLabel}>{t('received')}</Text></View>
+                <View style={[styles.progressBox, { backgroundColor: colors.navyBg }]}><Text style={[styles.progressValue, { color: colors.navy }]}>{fmtK(expectedNpr)}</Text><Text style={styles.progressLabel}>{t('expected')}</Text></View>
+                <View style={[styles.progressBox, { backgroundColor: colors.greenLight }]}><Text style={[styles.progressValue, { color: colors.green }]}>{fmtK(receivedNpr)}</Text><Text style={styles.progressLabel}>{t('received')}</Text></View>
                 <View style={[styles.progressBox, { backgroundColor: colors.orangeLight }]}><Text style={[styles.progressValue, { color: colors.orange }]}>{followupCount}</Text><Text style={styles.progressLabel}>{t('followUp')}</Text></View>
               </View>
             </View>
@@ -145,14 +155,14 @@ export default function CenterMeetingScreen() {
 
             <View style={styles.memberList}>
               <View style={styles.memberListHeader}><Text style={styles.memberListTitle}>{t('memberAttendance')}</Text></View>
-              {MEMBERS.map(member => (
-                <View key={member.id} style={styles.memberRow}>
+              {members.map(member => (
+                <View key={member.memberId} style={styles.memberRow}>
                   <View style={styles.memberAvatar}><Text style={styles.memberAvatarText}>{member.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</Text></View>
-                  <View style={{ flex: 1 }}><Text style={styles.memberName} numberOfLines={1}>{member.name}</Text><Text style={styles.memberId}>{member.id}</Text></View>
+                  <View style={{ flex: 1 }}><Text style={styles.memberName} numberOfLines={1}>{member.name}</Text><Text style={styles.memberId}>{member.memberId}</Text></View>
                   <View style={styles.statusButtons}>
                     {['present','paid','absent','follow-up'].map(st => (
-                      <TouchableOpacity key={st} onPress={() => updateStatus(member.id, st)} style={[styles.statusBtn, memberStatuses[member.id] === st && { backgroundColor: getStatusColor(st) }]}>
-                        <Text style={[styles.statusBtnText, memberStatuses[member.id] === st && { color: colors.white }]}>{getStatusLabel(st)}</Text>
+                      <TouchableOpacity key={st} onPress={() => updateStatus(member.memberId, st)} style={[styles.statusBtn, memberStatuses[member.memberId] === st && { backgroundColor: getStatusColor(st) }]}>
+                        <Text style={[styles.statusBtnText, memberStatuses[member.memberId] === st && { color: colors.white }]}>{getStatusLabel(st)}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -169,20 +179,20 @@ export default function CenterMeetingScreen() {
                     const ac = Object.values(memberStatuses).filter(s => s === 'absent').length;
                     const fc = Object.values(memberStatuses).filter(s => s === 'follow-up').length;
                     await completeCenterMeeting(meetingId, {
-                      centerId: '204',
-                      centerName: 'Kalika Women Center',
+                      centerId: center.id,
+                      centerName: center.name,
                       meetingDate: new Date().toISOString().split('T')[0],
                       totalMembers: totalCount,
                       presentCount: pc,
                       paidCount: pdc,
                       absentCount: ac,
                       followupCount: fc,
-                      collectionExpected: 68000,
-                      collectionReceived: 42000,
-                      attendance: Object.entries(memberStatuses).map(([memberId, status]) => ({
-                        clientId: 0,
-                        memberId,
-                        status: status as 'present' | 'paid' | 'absent' | 'follow-up',
+                      collectionExpected: expectedNpr,
+                      collectionReceived: receivedNpr,
+                      attendance: members.map(m => ({
+                        clientId: m.clientId,
+                        memberId: m.memberId,
+                        status: (memberStatuses[m.memberId] || 'present') as 'present' | 'paid' | 'absent' | 'follow-up',
                       })),
                     });
                   } catch (e) { /* silent */ }

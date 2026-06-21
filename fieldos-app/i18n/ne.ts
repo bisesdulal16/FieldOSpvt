@@ -61,6 +61,12 @@ const ne = {
 
   // ─── Record Collection ──────────────────────────────────────
   recordCollectionTitle: 'संकलन रेकर्ड',
+  selectClientTitle: 'ग्राहक छान्नुहोस्',
+  searchClientPlaceholder: 'नाम वा सदस्य आईडीले खोज्नुहोस्',
+  noClientsFound: 'कुनै ग्राहक भेटिएन',
+  gpsCapturing: 'GPS स्थान लिँदै…',
+  gpsCaptured: 'यो संकलनको लागि स्थान लिइयो',
+  gpsDeniedShort: 'स्थान उपलब्ध छैन — पुनः प्रयास गर्नुहोस्',
   verified: 'सत्यापित',
   dueAmount: 'थप रकम',
   outstanding: 'बाँकी रकम',
@@ -177,6 +183,10 @@ const ne = {
   // ─── Visit Check-in ─────────────────────────────────────────
   visitCheckin: 'भेट चेक-इन',
   checkinSuccessful: 'चेक-इन सफल!',
+  visitOutcomeTitle: 'यो भ्रमणमा के भयो?',
+  outcomeCollect: 'संकलन रेकर्ड गर्नुहोस्',
+  outcomePromise: 'तिर्ने वाचा',
+  outcomeNoneDone: 'भुक्तानी छैन — सम्पन्न',
   officialVisitRecorded: 'आधिकारिक भेट रेकर्ड गरियो',
   gpsLogged: 'GPS लग गरियो',
   visitPurpose: 'भेटको उद्देश्य',

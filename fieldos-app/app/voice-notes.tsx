@@ -89,7 +89,7 @@ export default function VoiceNotesScreen() {
     try {
       const result = await createNote({
         rawText: noteText.trim(),
-        clientId: selectedClient?.id ? Number(selectedClient.id) : null,
+        clientId: (selectedClient as any)?.clientId ?? (Number(selectedClient?.id) || null),
         title: noteTitle.trim() || `Note — ${new Date().toLocaleDateString()}`,
       });
 
@@ -215,7 +215,7 @@ export default function VoiceNotesScreen() {
             </View>
           ) : notes.length === 0 ? (
             <View style={styles.centerContent}>
-              <Ionicons name="mic-outline" size={48} color={colors.gray300} />
+              <Ionicons name="create-outline" size={48} color={colors.gray300} />
               <Text style={styles.emptyTitle}>{t('noVoiceNotes')}</Text>
               <Text style={styles.emptyDesc}>
                 {t('noVoiceNotesDesc')}

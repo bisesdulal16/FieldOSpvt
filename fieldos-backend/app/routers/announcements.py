@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # POST /manager/announcements — manager sends announcements
 manager_router = APIRouter(
-    prefix="/announcements",
+    prefix="/manager/announcements",
     tags=["Announcements"],
     dependencies=[Depends(require_manager_or_admin)],
 )
