@@ -20,8 +20,8 @@ async def create_eod_report(
     db=Depends(get_db),
 ):
     try:
-        officer_id = None
-        if authorization:
+        officer_id = request.officer_id
+        if officer_id is None and authorization:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             payload = auth_service.verify_token(token)
             if payload:

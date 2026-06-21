@@ -9,6 +9,7 @@ import { useTranslation } from '../i18n';
 import { AppHeader } from '../components/fieldos/AppHeader';
 import { StatusChip } from '../components/fieldos/StatusChip';
 import { PrimaryButton } from '../components/fieldos/PrimaryButton';
+import { SecondaryButton } from '../components/fieldos/SecondaryButton';
 import { ValidationError } from '../components/fieldos/ValidationError';
 import { ValidationWarning } from '../components/fieldos/ValidationWarning';
 import { PrivacyNoteCard } from '../components/fieldos/PrivacyNoteCard';
@@ -152,9 +153,8 @@ export default function VisitCheckinScreen() {
         gpsAddress: gpsData?.address ?? (gpsDenied ? 'GPS denied' : 'Unknown'),
       });
     } catch (e) { /* silent — offline-first */ }
-    // Replace (not push) so we don't stack the collection modal on top of
-    // the visit modal — keeps the flow to a single screen at a time.
-    setTimeout(() => router.replace('/record-collection'), 2000);
+    // Visit is recorded. The officer now chooses the outcome (collection,
+    // promise-to-pay, or just the visit) — a visit does not force a collection.
   };
 
   return (
@@ -170,6 +170,19 @@ export default function VisitCheckinScreen() {
             <View style={styles.successMeta}>
               <View style={styles.metaItem}><Ionicons name="location-outline" size={12} color={colors.gray400} /><Text style={styles.metaText}>{t('gpsLogged')} {gpsData ? `· ${gpsData.address}` : gpsDenied ? '(denied)' : '(timeout)'}</Text></View>
               <View style={styles.metaItem}><Ionicons name="time-outline" size={12} color={colors.gray400} /><Text style={styles.metaText}>{new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</Text></View>
+            </View>
+
+            {/* Visit outcome — a visit does NOT have to be a collection */}
+            <Text style={[styles.cardTitle, { marginTop: spacing.xl, textAlign: 'center' }]}>{t('visitOutcomeTitle')}</Text>
+            <View style={styles.outcomeActions}>
+              <PrimaryButton icon="wallet" onPress={() => router.replace('/record-collection')}>{t('outcomeCollect')}</PrimaryButton>
+              <SecondaryButton icon="time" onPress={() => router.replace('/promise-to-pay')}>{t('outcomePromise')}</SecondaryButton>
+              <TouchableOpacity
+                onPress={() => { try { if (router.canDismiss()) router.dismissAll(); } catch { /* no modal */ } router.navigate('/(tabs)/tasks'); }}
+                style={styles.outcomeDone}
+              >
+                <Text style={styles.outcomeDoneText}>{t('outcomeNoneDone')}</Text>
+              </TouchableOpacity>
             </View>
           </View>
         ) : (
@@ -306,6 +319,9 @@ const styles = StyleSheet.create({
   successTitle: { fontSize: fontSize['4xl'], fontWeight: 'bold', color: colors.gray800, marginBottom: 4 },
   successDesc: { fontSize: fontSize.md, color: colors.gray500, textAlign: 'center', marginBottom: spacing.sm },
   successMeta: { marginTop: spacing.xl, gap: 4 },
+  outcomeActions: { width: '100%', gap: spacing.sm, marginTop: spacing.md },
+  outcomeDone: { paddingVertical: spacing.md, alignItems: 'center' },
+  outcomeDoneText: { fontSize: fontSize.md, fontWeight: '600', color: colors.gray500 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: fontSize.sm, color: colors.gray400 },
   cancelButton: { paddingVertical: spacing.md, alignItems: 'center' },
