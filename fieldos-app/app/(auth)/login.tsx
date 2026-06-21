@@ -222,9 +222,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', borderRadius: 9999, borderWidth: 1, borderColor: colors.gray200,
     padding: 2, marginTop: spacing.sm,
   },
-  langButton: { paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: 9999 },
+  langButton: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: 9999 },
   langButtonActive: { backgroundColor: colors.navy },
-  langButtonText: { fontSize: fontSize.base, fontWeight: '600', color: colors.gray500 },
+  langButtonText: { fontSize: fontSize.lg, fontWeight: '700', color: colors.gray500 },
   langButtonTextActive: { color: colors.white },
   formSection: { flex: 1, paddingHorizontal: spacing.xl },
   formCard: {

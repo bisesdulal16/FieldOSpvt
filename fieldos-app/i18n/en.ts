@@ -177,6 +177,10 @@ const en = {
   // ─── Visit Check-in ─────────────────────────────────────────
   visitCheckin: 'Visit Check-in',
   checkinSuccessful: 'Check-in Successful!',
+  visitOutcomeTitle: 'What happened on this visit?',
+  outcomeCollect: 'Record Collection',
+  outcomePromise: 'Promise to Pay',
+  outcomeNoneDone: 'No payment — done',
   officialVisitRecorded: 'Official visit has been recorded',
   gpsLogged: 'GPS logged',
   visitPurpose: 'Visit Purpose',

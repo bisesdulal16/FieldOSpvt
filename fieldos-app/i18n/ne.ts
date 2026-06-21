@@ -177,6 +177,10 @@ const ne = {
   // ─── Visit Check-in ─────────────────────────────────────────
   visitCheckin: 'भेट चेक-इन',
   checkinSuccessful: 'चेक-इन सफल!',
+  visitOutcomeTitle: 'यो भ्रमणमा के भयो?',
+  outcomeCollect: 'संकलन रेकर्ड गर्नुहोस्',
+  outcomePromise: 'तिर्ने वाचा',
+  outcomeNoneDone: 'भुक्तानी छैन — सम्पन्न',
   officialVisitRecorded: 'आधिकारिक भेट रेकर्ड गरियो',
   gpsLogged: 'GPS लग गरियो',
   visitPurpose: 'भेटको उद्देश्य',
