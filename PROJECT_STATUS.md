@@ -1,7 +1,7 @@
 # FieldOS Nepal — Project Status & Resume Guide
 
 **Last updated:** 2026-06-21
-**Active branch:** `fix/sync-fields-nav-dashboard-round2` (16 commits ahead of `main`, pushed, **not yet merged**)
+**Branch:** all pilot-hardening work is **merged into `main`** (merge `5839a3830`, pushed). Work from `main`; branch off it for new work.
 
 This is the "start here" doc. It says where we are, how to resume, what works,
 what's mocked, and what's next. Companion docs:
@@ -95,7 +95,7 @@ For production/multi-branch, switch to PostgreSQL (see deployment guide).
 ---
 
 ## What's next (recommended order)
-1. **Merge `fix/sync-fields-nav-dashboard-round2` → `main`** to lock the pilot build (branch is 16 commits ahead).
+1. ✅ Done — pilot-hardening branch merged to `main`.
 2. **Phase 1 — Productivity tracking core** (`PRODUCTIVITY_TRACKING_SCOPE.md`): last-seen + visit-point **map on the dashboard**, anomaly rules v1 (visit GPS vs client center, EOD-vs-actual, collection-without-visit, mock-GPS), → Exceptions Queue + manager alerts. (~2 wks)
 3. **Phase 2 — Photo proof** selfies at start-day/high-value + mock-GPS detection. (~1 wk)
 4. Smaller: device registration fix; server-side storage for voice notes/KYC; "Change client" button on Collect; wire remaining pilot dashboard sub-pages.
