@@ -1,9 +1,13 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../constants';
 
 export default function TabLayout() {
+  // Pad the tab bar by the device's bottom inset so it sits above the
+  // Android gesture-nav bar / iOS home indicator instead of behind it.
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
@@ -20,8 +24,8 @@ export default function TabLayout() {
           borderTopColor: colors.gray100,
           borderTopWidth: 1,
           paddingTop: 4,
-          paddingBottom: 4,
-          height: 60,
+          paddingBottom: insets.bottom + 4,
+          height: 60 + insets.bottom,
         },
         tabBarActiveBackgroundColor: colors.navyBg,
       }}
