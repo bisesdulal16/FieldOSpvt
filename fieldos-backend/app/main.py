@@ -18,6 +18,9 @@ from app.routers import (
     sync,
     tasks,
     clients,
+    loans,
+    branding,
+    day_start,
     collections,
     visit,
     promise,
@@ -102,6 +105,9 @@ app.include_router(bootstrap.router, prefix=settings.API_V1_PREFIX, tags=["Mobil
 app.include_router(sync.router, prefix=settings.API_V1_PREFIX, tags=["Sync"])
 app.include_router(tasks.router, prefix=settings.API_V1_PREFIX, tags=["Tasks"])
 app.include_router(clients.router, prefix=settings.API_V1_PREFIX, tags=["Clients"])
+app.include_router(loans.router, prefix=settings.API_V1_PREFIX, tags=["Loans"])
+app.include_router(branding.router, prefix=settings.API_V1_PREFIX, tags=["Branding"])
+app.include_router(day_start.router, prefix=settings.API_V1_PREFIX, tags=["Day Start"])
 app.include_router(collections.router, prefix=settings.API_V1_PREFIX, tags=["Collections"])
 app.include_router(visit.router, prefix=settings.API_V1_PREFIX, tags=["Visit Check-ins"])
 app.include_router(promise.router, prefix=settings.API_V1_PREFIX, tags=["Promise to Pay"])
@@ -122,7 +128,7 @@ app.include_router(announcements.mobile_router, prefix=settings.API_V1_PREFIX, t
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": settings.PROJECT_NAME, "db": "sqlite", "ai_v1": "enabled", "voice_ai_v2": "enabled", "pilot": "enabled"}
+    return {"status": "ok", "service": settings.PROJECT_NAME, "db": "sqlite" if settings.is_sqlite else "postgres", "ai_v1": "enabled", "voice_ai_v2": "enabled", "pilot": "enabled"}
 
 
 

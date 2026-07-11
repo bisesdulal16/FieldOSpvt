@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
@@ -12,6 +12,7 @@ import { initSecureStorage } from '../../services/secureStorage';
 import { biometricLogin, isBiometricAvailable } from '../../services/biometricAuth';
 import { loginWithPin, loginWithBiometric, initAuth } from '../../services/authService';
 import { setSetting } from '../../db/repositories/settingsRepo';
+import { fetchBranding, DEFAULT_BRANDING, type Branding } from '../../services/brandingService';
 import { useTranslation } from '../../i18n';
 
 export default function LoginScreen() {
@@ -25,6 +26,7 @@ export default function LoginScreen() {
   const [bioType, setBioType] = useState<string>('');
   const [bioLoading, setBioLoading] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [branding, setBranding] = useState<Branding>(DEFAULT_BRANDING);
 
   useEffect(() => {
     (async () => {
@@ -33,6 +35,7 @@ export default function LoginScreen() {
       setBioAvailable(bio.available);
       setBioType(bio.biometricType || '');
       await initSecureStorage();
+      setBranding(await fetchBranding());
     })();
   }, []);
 
@@ -82,11 +85,15 @@ export default function LoginScreen() {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.topSection}>
         <View style={styles.logoContainer}>
-          <View style={styles.logoBox}>
-            <Ionicons name="business" size={28} color={colors.white} />
-          </View>
-          <Text style={styles.appTitle}>FieldOS</Text>
-          <Text style={styles.appSubTitle}>NEPAL</Text>
+          {branding.logoUrl ? (
+            <Image source={{ uri: branding.logoUrl }} style={styles.logoImage} resizeMode="contain" />
+          ) : (
+            <View style={styles.logoBox}>
+              <Ionicons name="business" size={28} color={colors.white} />
+            </View>
+          )}
+          <Text style={styles.appTitle}>{branding.orgName}</Text>
+          {!!branding.tagline && <Text style={styles.appSubTitle}>{branding.tagline.toUpperCase()}</Text>}
         </View>
         <Text style={styles.institutionName}>
           {t('institutionName')}
@@ -215,6 +222,7 @@ const styles = StyleSheet.create({
     shadowColor: colors.navy, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
   },
+  logoImage: { width: 56, height: 56, borderRadius: borderRadius.xl, marginBottom: spacing.sm },
   appTitle: { fontSize: fontSize['4xl'], fontWeight: 'bold', color: colors.navy },
   appSubTitle: { fontSize: fontSize.md, fontWeight: 'bold', color: colors.orange },
   institutionName: { fontSize: fontSize.md, color: colors.gray500, marginBottom: spacing.xs },

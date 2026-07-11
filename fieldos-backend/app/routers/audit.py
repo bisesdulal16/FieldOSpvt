@@ -7,9 +7,10 @@ from sqlalchemy import select, func
 
 from app.database import get_db
 from app.models.audit_log import AuditLog
+from app.models.user import User
 from app.schemas.audit import AuditBatchRequest
 from app.schemas.common import ApiResponse
-from app.services import auth_service
+from app.deps.auth_deps import get_current_user, require_manager_or_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/audit-events", tags=["Audit"])
@@ -18,21 +19,15 @@ router = APIRouter(prefix="/audit-events", tags=["Audit"])
 @router.post("/", response_model=ApiResponse)
 async def submit_audit_events(
     request: AuditBatchRequest,
-    authorization: str = Query(None, description="Bearer token"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
-        user_id = None
-        role = None
-        branch_id = None
+        # Attribution comes from the authenticated token, never the payload.
+        user_id = current_user.id
+        role = current_user.role
+        branch_id = current_user.branch_id
         device_id = None
-
-        if authorization:
-            token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-            payload = auth_service.verify_token(token)
-            if payload:
-                user_id = int(payload.get("sub", 0))
-                role = payload.get("role")
 
         created_count = 0
         for event in request.events:
@@ -62,7 +57,7 @@ async def submit_audit_events(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Audit event submission failed")
 
 
-@router.get("/", response_model=ApiResponse)
+@router.get("/", response_model=ApiResponse, dependencies=[Depends(require_manager_or_admin)])
 async def get_audit_events(
     action_type: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),

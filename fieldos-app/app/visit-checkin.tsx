@@ -121,6 +121,10 @@ export default function VisitCheckinScreen() {
   }, [t]);
 
   const gpsDenied = gpsStatus === 'denied';
+  // A check-in is only "GPS-verified" when we actually captured coordinates. Permission
+  // denied, GPS unavailable, or a location timeout all count as "no fix" — the officer must
+  // then explain why, so a check-in can never silently succeed with no location.
+  const noGpsFix = !gpsData;
 
   // Request GPS on mount
   useEffect(() => {
@@ -136,7 +140,7 @@ export default function VisitCheckinScreen() {
       return;
     }
 
-    if (gpsDenied && !saveReason.trim()) {
+    if (noGpsFix && !saveReason.trim()) {
       setError(t('gpsUnavailableReason'));
       return;
     }
@@ -150,7 +154,7 @@ export default function VisitCheckinScreen() {
         gpsLatitude: gpsData?.latitude,
         gpsLongitude: gpsData?.longitude,
         gpsAccuracyMeters: gpsData?.accuracy,
-        gpsAddress: gpsData?.address ?? (gpsDenied ? 'GPS denied' : 'Unknown'),
+        gpsAddress: gpsData?.address ?? (gpsDenied ? `GPS denied — ${saveReason.trim()}` : `No GPS fix — ${saveReason.trim()}`),
       });
     } catch (e) { /* silent — offline-first */ }
     // Visit is recorded. The officer now chooses the outcome (collection,
@@ -263,9 +267,9 @@ export default function VisitCheckinScreen() {
             {(gpsStatus === 'success' || gpsStatus === 'unavailable' || gpsDenied) && (
               <>
                 <PrivacyNoteCard />
-                <ValidationError message={error} />
-                <PrimaryButton onPress={handleCheckIn} icon="checkmark-circle">{gpsDenied ? t('saveWithReason') : t('confirmCheckin')}</PrimaryButton>
-                {gpsDenied && (
+                {/* When there is no GPS fix, the reason box comes BEFORE the button so the
+                    officer sees they must explain before a check-in can be saved. */}
+                {noGpsFix && (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>{t('reason')}</Text>
                     <TextInput
@@ -278,6 +282,8 @@ export default function VisitCheckinScreen() {
                     />
                   </View>
                 )}
+                <ValidationError message={error} />
+                <PrimaryButton onPress={handleCheckIn} icon="checkmark-circle">{noGpsFix ? t('saveWithReason') : t('confirmCheckin')}</PrimaryButton>
               </>
             )}
 

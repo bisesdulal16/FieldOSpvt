@@ -3,11 +3,23 @@ Seed script for FieldOS Nepal — creates demo data.
 """
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import engine, Base, AsyncSessionLocal
+from app.utils.nepal_time import now_nepal
+
+
+class _NepalToday:
+    """Drop-in for date.today() that returns the current Asia/Kathmandu date, so seeded
+    'today' matches the app's Nepal-time task filter on any machine."""
+    @staticmethod
+    def today():
+        return now_nepal().date()
+
+
+date = _NepalToday()
 from app.models.branch import Branch
 from app.models.user import User
 from app.models.client import Client

@@ -94,6 +94,14 @@ export default function RootLayout() {
           name="pilot-info"
           options={{ presentation: 'fullScreenModal', animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="register-borrower"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="loan-application"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_right' }}
+        />
       </Stack>
       <FaceVerificationModal />
       </OnDeviceLLMProvider>

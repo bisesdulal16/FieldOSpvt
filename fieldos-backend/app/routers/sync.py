@@ -6,9 +6,11 @@ from sqlalchemy import select
 
 from app.database import get_db
 from app.models.sync_event import SyncEvent
+from app.models.user import User
 from app.schemas.sync import SyncBatchRequest, SyncEventResult, SyncStatusResponse
 from app.schemas.common import ApiResponse
 from app.services import sync_service
+from app.deps.auth_deps import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sync", tags=["Sync"])
@@ -18,6 +20,7 @@ router = APIRouter(prefix="/sync", tags=["Sync"])
 async def submit_sync_events(
     request: SyncBatchRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         results = []
@@ -33,14 +36,15 @@ async def submit_sync_events(
             db.add(sync_event)
             await db.flush()
 
-            # Process the event
+            # Process the event — attribute to the authenticated officer, not the payload.
             process_result = await sync_service.process_sync_event(
                 db, {
                     "entity_type": event_data.entity_type,
                     "entity_id": event_data.entity_id,
                     "operation": event_data.operation,
                     "payload": event_data.payload,
-                }
+                },
+                authed_officer_id=current_user.id,
             )
 
             # Update sync event status
@@ -64,7 +68,10 @@ async def submit_sync_events(
 
 
 @router.get("/status", response_model=ApiResponse)
-async def get_sync_status(db: AsyncSession = Depends(get_db)):
+async def get_sync_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         pending_count = await sync_service.get_pending_sync_count(db)
 

@@ -16,5 +16,8 @@ class Branch(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     name_ne: Mapped[str | None] = mapped_column(String(200), nullable=True)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Registered office public IP(s), comma-separated. When set, officers can only start their
+    # day from the branch network (proves physical presence). Empty = gate disabled.
+    office_ip: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     users = relationship("User", back_populates="branch")

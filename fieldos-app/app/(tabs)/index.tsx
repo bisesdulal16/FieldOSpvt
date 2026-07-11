@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
@@ -15,6 +15,7 @@ import { getCurrentUser } from '../../services/authService';
 import { fetchAnnouncements } from '../../services/announcementService';
 import type { PriorityClient, AISuggestion } from '../../services/aiService';
 import { fetchAssignedTasks } from '../../services/taskService';
+import { startDayWithVerification, captureSelfie } from '../../services/dayStartService';
 import { getActivePromises } from '../../db/repositories/promiseToPayRepo';
 import { getTotalCollectedToday } from '../../db/repositories/collectionsRepo';
 import { query } from '../../db/database';
@@ -30,9 +31,34 @@ export default function DashboardScreen() {
     syncItemsReady,
     syncFailedCount,
     loadSyncStatus,
+    startDay,
   } = useFieldOSStore();
   const { t } = useTranslation();
   const totalUnsynced = syncItemsReady + syncFailedCount;
+  const [startingDay, setStartingDay] = useState(false);
+
+  // Real start-of-day: take a selfie, then the server checks the officer is on the branch
+  // office network (403 if not). Only then does the local day begin.
+  const handleStartDay = useCallback(async () => {
+    if (startingDay) return;
+    setStartingDay(true);
+    try {
+      const selfie = await captureSelfie();            // front-camera photo (or null if skipped)
+      const result = await startDayWithVerification(selfie);
+      if (result.blocked) {
+        Alert.alert(t('dayStartBlockedTitle'), result.message || t('dayStartBlockedMsg'));
+        return;
+      }
+      await startDay();                                 // local day-started state + audit + sync
+      if (result.ipVerified) {
+        Alert.alert(t('dayStartedTitle'), t('dayStartedVerified'));
+      } else if (result.message === 'offline') {
+        Alert.alert(t('dayStartedTitle'), t('dayStartedOffline'));
+      }
+    } finally {
+      setStartingDay(false);
+    }
+  }, [startingDay, startDay, t]);
 
   // AI state
   const [priorityQueue, setPriorityQueue] = useState<PriorityClient[]>([]);
@@ -195,11 +221,16 @@ export default function DashboardScreen() {
                 <Text style={styles.verificationNoteText}>{t('identityVerificationRequired')}</Text>
               </View>
               <TouchableOpacity
-                onPress={() => openFaceVerification('start-day')}
+                onPress={handleStartDay}
+                disabled={startingDay}
                 activeOpacity={0.8}
                 style={styles.startDayButton}
               >
-                <Ionicons name="shield-outline" size={18} color={colors.navy} />
+                {startingDay ? (
+                  <ActivityIndicator size="small" color={colors.navy} />
+                ) : (
+                  <Ionicons name="shield-outline" size={18} color={colors.navy} />
+                )}
                 <Text style={styles.startDayButtonText}>{t('startDayBtn')}</Text>
               </TouchableOpacity>
             </View>

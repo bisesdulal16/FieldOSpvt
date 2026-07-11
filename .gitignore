@@ -49,3 +49,35 @@ coverage/
 # Python bytecode
 __pycache__/
 *.pyc
+# Secrets and local databases — never commit (added during pilot hardening)
+**/.env
+**/.env.local
+*.db
+fieldos-backend/fieldos_nepal.db
+
+# Environment variables
+.env
+**/.env
+
+# Python virtual environments
+venv/
+**/venv/
+.venv/
+**/.venv/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Node / Next.js
+node_modules/
+.next/
+.expo/
+
+# OS files
+.DS_Store

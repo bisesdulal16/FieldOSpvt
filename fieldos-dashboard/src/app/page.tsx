@@ -68,7 +68,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { useManagerAPI, apiLogin, useAutoRefresh, useCBSAPI, useSecurityAPI, usePilotAPI, apiMutation } from '@/lib/useManagerAPI';
+import { useManagerAPI, apiLogin, useAutoRefresh, useCBSAPI, useSecurityAPI, usePilotAPI, apiMutation, useBranding } from '@/lib/useManagerAPI';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -112,6 +112,10 @@ type ViewId =
   | 'pilot-escalations'
   | 'pilot-agreements'
   | 'assign-task'
+  | 'loan-approvals'
+  | 'receipts'
+  | 'day-starts'
+  | 'staff-map'
   | 'announcements';
 
 interface StoredUser {
@@ -134,6 +138,9 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'eod', label: 'End-of-Day Review', icon: <ClipboardCheck className="h-5 w-5" /> },
   { id: 'sync', label: 'Sync Monitoring', icon: <RefreshCw className="h-5 w-5" /> },
   { id: 'audit', label: 'Audit Logs', icon: <FileText className="h-5 w-5" /> },
+  { id: 'loan-approvals', label: 'Loan Approvals', icon: <BadgeCheck className="h-5 w-5" /> },
+  { id: 'receipts', label: 'Client Receipts', icon: <Send className="h-5 w-5" /> },
+  { id: 'day-starts', label: 'Day-Start Attendance', icon: <MapPin className="h-5 w-5" /> },
   { id: 'assign-task', label: 'Assign Task', icon: <Plus className="h-5 w-5" /> },
   { id: 'announcements', label: 'Announcements', icon: <Bell className="h-5 w-5" /> },
 ];
@@ -190,11 +197,13 @@ function formatNpr(amount: number | null | undefined): string {
 }
 
 function getTodayStr(): string {
+  // Show the Nepal date so the header matches the backend's Asia/Kathmandu "today".
   return new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+    timeZone: 'Asia/Kathmandu',
   });
 }
 
@@ -404,6 +413,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: StoredUser, token: string) =
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const branding = useBranding();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -426,11 +436,16 @@ function LoginScreen({ onLogin }: { onLogin: (user: StoredUser, token: string) =
       <div className="w-full max-w-md">
         {/* Logo / Branding */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-amber-500 mb-4">
-            <Building2 className="h-8 w-8 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-white">FieldOS Nepal</h1>
-          <p className="text-sm text-gray-400 mt-1">Branch Manager Dashboard</p>
+          {branding.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- tenant logo is an arbitrary external URL
+            <img src={branding.logo_url} alt={branding.org_name} className="inline-block h-16 w-16 rounded-2xl object-contain mb-4 bg-white/10" />
+          ) : (
+            <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl mb-4" style={{ backgroundColor: branding.accent_color }}>
+              <Building2 className="h-8 w-8 text-white" />
+            </div>
+          )}
+          <h1 className="text-2xl font-bold text-white">{branding.org_name}{branding.tagline ? ` ${branding.tagline}` : ''}</h1>
+          <p className="text-sm text-gray-400 mt-1">{branding.product_suffix}</p>
         </div>
 
         {/* Login Card */}
@@ -4997,6 +5012,218 @@ function PilotAgreementsView({ enabled }: { enabled: boolean }) {
 
 // ── Assign Task View ──────────────────────────────────────────────
 
+function DayStartsView({ enabled }: { enabled: boolean }) {
+  const { data, loading, error } = useManagerAPI<any[]>('day-starts', enabled);
+  const rows = data || [];
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Day-Start Attendance</h1>
+        <p className="text-sm text-gray-500 mt-1">Officers can only start their day from the branch office network. Each start captures a selfie and whether it came from the verified office network.</p>
+      </div>
+
+      {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent day-starts ({rows.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : rows.length === 0 ? (
+            <p className="text-sm text-gray-500">No day-starts recorded yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {rows.map((r: any) => (
+                <div key={r.id} className="flex items-center gap-4 border border-gray-200 rounded-md px-4 py-3">
+                  {r.selfie_data_uri ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- captured selfie data URI
+                    <img src={r.selfie_data_uri} alt="selfie" className="h-12 w-12 rounded-lg object-cover bg-gray-100 shrink-0" />
+                  ) : (
+                    <div className="h-12 w-12 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 text-xs shrink-0">no photo</div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900">{r.officer_name} <span className="text-gray-400">· {r.staff_id}</span></p>
+                    <p className="text-sm text-gray-500">{r.day_date} · {r.started_at?.slice(11, 16)} · {r.gps_address || 'no GPS'} · IP {r.source_ip}</p>
+                  </div>
+                  {r.ip_verified ? (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-green-100 text-green-700 shrink-0">Office network ✓</span>
+                  ) : (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">Unverified network</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ClientReceiptsView({ enabled }: { enabled: boolean }) {
+  const { data: receipts, loading, error } = useManagerAPI<any[]>('receipts', enabled);
+  const rows = receipts || [];
+  const statusStyle: Record<string, string> = {
+    sent: 'bg-green-100 text-green-700',
+    failed: 'bg-red-100 text-red-700',
+    queued: 'bg-amber-100 text-amber-700',
+    no_phone: 'bg-gray-100 text-gray-600',
+  };
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Client Receipts</h1>
+        <p className="text-sm text-gray-500 mt-1">Every collection auto-sends the client an SMS with the exact recorded amount — the client&apos;s check against under-reporting. This is the log of those messages.</p>
+      </div>
+
+      {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Receipt SMS sent to clients ({rows.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : rows.length === 0 ? (
+            <p className="text-sm text-gray-500">No receipts sent yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-200">
+                    <th className="py-2 pr-4 font-medium">Client</th>
+                    <th className="py-2 pr-4 font-medium">Phone</th>
+                    <th className="py-2 pr-4 font-medium">Receipt</th>
+                    <th className="py-2 pr-4 font-medium">Message</th>
+                    <th className="py-2 pr-4 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r: any) => (
+                    <tr key={r.id} className="border-b border-gray-100 align-top">
+                      <td className="py-2 pr-4 font-medium text-gray-900 whitespace-nowrap">{r.client_name}<span className="text-gray-400"> · {r.member_id}</span></td>
+                      <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{r.phone_number || '—'}</td>
+                      <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{r.receipt_id}</td>
+                      <td className="py-2 pr-4 text-gray-600 max-w-md">{r.message}</td>
+                      <td className="py-2 pr-4"><span className={`text-xs font-medium px-2 py-0.5 rounded ${statusStyle[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function LoanApprovalsView({ enabled }: { enabled: boolean }) {
+  const { data: loans, loading, error, refetch } = useManagerAPI<any[]>('loans/', enabled);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string>('');
+
+  const act = async (loanId: string, action: 'approve' | 'disburse') => {
+    setBusyId(loanId);
+    setMsg('');
+    try {
+      const res = await apiMutation(`loans/${loanId}/${action}`, 'POST', {});
+      if (res.success) {
+        setMsg(`${loanId} ${action === 'approve' ? 'approved' : 'disbursed — repayment schedule generated'}.`);
+        refetch();
+      } else {
+        setMsg(res.error || `Failed to ${action} ${loanId}`);
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const pending = (loans || []).filter((l: any) => l.status === 'pending');
+  const approved = (loans || []).filter((l: any) => l.status === 'approved');
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Loan Approvals</h1>
+        <p className="text-sm text-gray-500 mt-1">Approve applications and disburse loans. Disbursement generates the weekly repayment schedule and makes the borrower collectable.</p>
+      </div>
+
+      {msg && (
+        <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{msg}</div>
+      )}
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Pending Applications ({pending.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : pending.length === 0 ? (
+            <p className="text-sm text-gray-500">No applications awaiting approval.</p>
+          ) : (
+            <div className="space-y-3">
+              {pending.map((l: any) => (
+                <div key={l.loan_id} className="flex items-center justify-between border border-gray-200 rounded-md px-4 py-3">
+                  <div>
+                    <p className="font-medium text-gray-900">{l.client_name} <span className="text-gray-400">· {l.member_id}</span></p>
+                    <p className="text-sm text-gray-500">{l.loan_id} · Principal NPR {Number(l.principal_amount).toLocaleString()} · Installment NPR {Number(l.installment_amount).toLocaleString()}/wk</p>
+                  </div>
+                  <button
+                    disabled={busyId === l.loan_id}
+                    onClick={() => act(l.loan_id, 'approve')}
+                    className="rounded-md bg-[#0B1B3A] text-white text-sm font-medium px-4 py-2 disabled:opacity-50"
+                  >
+                    {busyId === l.loan_id ? 'Approving…' : 'Approve'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Approved — Awaiting Disbursement ({approved.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {approved.length === 0 ? (
+            <p className="text-sm text-gray-500">Nothing to disburse.</p>
+          ) : (
+            <div className="space-y-3">
+              {approved.map((l: any) => (
+                <div key={l.loan_id} className="flex items-center justify-between border border-gray-200 rounded-md px-4 py-3">
+                  <div>
+                    <p className="font-medium text-gray-900">{l.client_name} <span className="text-gray-400">· {l.member_id}</span></p>
+                    <p className="text-sm text-gray-500">{l.loan_id} · Principal NPR {Number(l.principal_amount).toLocaleString()}</p>
+                  </div>
+                  <button
+                    disabled={busyId === l.loan_id}
+                    onClick={() => act(l.loan_id, 'disburse')}
+                    className="rounded-md bg-[#16A34A] text-white text-sm font-medium px-4 py-2 disabled:opacity-50"
+                  >
+                    {busyId === l.loan_id ? 'Disbursing…' : 'Disburse'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function AssignTaskView({ enabled }: { enabled: boolean }) {
   const { data: staffData, loading: staffLoading, error: staffError } = useManagerAPI<any[]>('manager/staff', enabled);
   const { data: clientsData, loading: clientsLoading, error: clientsError } = useManagerAPI<any[]>('manager/clients', enabled);
@@ -5284,6 +5511,7 @@ export default function DashboardPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const branding = useBranding();
 
   // Check for existing session on mount
   useEffect(() => {
@@ -5403,6 +5631,12 @@ export default function DashboardPage() {
         return <SyncView enabled={activeView === 'sync'} />;
       case 'audit':
         return <AuditView enabled={activeView === 'audit'} />;
+      case 'loan-approvals':
+        return <LoanApprovalsView enabled={activeView === 'loan-approvals'} />;
+      case 'receipts':
+        return <ClientReceiptsView enabled={activeView === 'receipts'} />;
+      case 'day-starts':
+        return <DayStartsView enabled={activeView === 'day-starts'} />;
       case 'assign-task':
         return <AssignTaskView enabled={activeView === 'assign-task'} />;
       case 'announcements':
@@ -5494,11 +5728,16 @@ export default function DashboardPage() {
       >
         {/* Brand */}
         <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
-          <div className="h-10 w-10 rounded-xl bg-amber-500 flex items-center justify-center shrink-0">
-            <Building2 className="h-5 w-5 text-white" />
-          </div>
+          {branding.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- tenant logo is an arbitrary external URL
+            <img src={branding.logo_url} alt={branding.org_name} className="h-10 w-10 rounded-xl object-contain shrink-0 bg-white/10" />
+          ) : (
+            <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: branding.accent_color }}>
+              <Building2 className="h-5 w-5 text-white" />
+            </div>
+          )}
           <div className="min-w-0">
-            <h1 className="text-sm font-bold text-white truncate">FieldOS Nepal</h1>
+            <h1 className="text-sm font-bold text-white truncate">{branding.org_name}{branding.tagline ? ` ${branding.tagline}` : ''}</h1>
             <p className="text-[11px] text-gray-400 truncate">
               {user.branch_name || 'Branch Manager'}
             </p>

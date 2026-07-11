@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database import get_db
 from app.models.center_meeting import CenterMeeting, MeetingAttendance
+from app.models.user import User
 from app.schemas.meeting import MeetingCreate
 from app.schemas.common import ApiResponse
+from app.deps.auth_deps import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
@@ -15,6 +17,7 @@ router = APIRouter(prefix="/meetings", tags=["Meetings"])
 async def create_meeting(
     request: MeetingCreate,
     db=Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         meeting = CenterMeeting(
@@ -22,6 +25,7 @@ async def create_meeting(
             center_name=request.center_name,
             meeting_date=request.meeting_date,
             location=request.location,
+            officer_id=current_user.id,
             total_members=request.total_members,
             present_count=request.present_count,
             paid_count=request.paid_count,

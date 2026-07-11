@@ -1,6 +1,6 @@
 """
 Manager Dashboard API — aggregated views for branch managers.
-No auth required (internal dashboard).
+All routes require a branch-manager/admin token (see router dependency below).
 """
 import json
 import time
@@ -15,6 +15,7 @@ from sqlalchemy.orm import aliased
 
 from app.database import get_db
 from app.deps.auth_deps import require_manager_or_admin
+from app.utils.nepal_time import today_nepal_str, days_ago_nepal_str
 from app.models.user import User, UserRole
 from app.models.client import Client
 from app.models.collection import Collection
@@ -24,6 +25,8 @@ from app.models.end_of_day import EndOfDayReport
 from app.models.sync_event import SyncEvent
 from app.models.audit_log import AuditLog
 from app.models.task import TaskAssignment
+from app.models.sms_notification import SmsNotification
+from app.models.day_start import DayStartRecord
 from app.models.loan_account import LoanAccount
 from app.models.device import Device
 from app.schemas.common import ApiResponse
@@ -39,11 +42,11 @@ router = APIRouter(
 
 
 def _today_str() -> str:
-    return str(date.today())
+    return today_nepal_str()
 
 
 def _yesterday_str() -> str:
-    return str(date.today() - timedelta(days=1))
+    return days_ago_nepal_str(1)
 
 
 def _ts() -> int:
@@ -429,7 +432,7 @@ async def get_collections(
         )).scalar() or 0
 
         # Week's collections (last 7 days)
-        week_start = (date.today() - timedelta(days=6)).isoformat()
+        week_start = days_ago_nepal_str(6)
         week_npr = (await db.execute(
             select(func.coalesce(func.sum(Collection.amount), 0))
             .where(Collection.collected_at >= week_start)
@@ -443,7 +446,7 @@ async def get_collections(
         # Daily breakdown — last 7 days
         daily_breakdown = []
         for i in range(6, -1, -1):
-            d = (date.today() - timedelta(days=i)).isoformat()
+            d = days_ago_nepal_str(i)
             day_total = (await db.execute(
                 select(func.coalesce(func.sum(Collection.amount), 0))
                 .where(Collection.collected_at.like(f"{d}%"))
@@ -1005,6 +1008,126 @@ async def get_audit_logs(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load audit logs",
         )
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/receipts — client receipt-SMS log (anti-under-reporting proof)
+# ---------------------------------------------------------------------------
+
+@router.get("/receipts", response_model=ApiResponse)
+async def get_receipt_notifications(
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every receipt SMS the system sent to a client on a collection, with the client name.
+    This is the manager's proof that clients were told the exact recorded amount."""
+    try:
+        stmt = (
+            select(SmsNotification, Client.name.label("client_name"), Client.member_id.label("member_id"))
+            .outerjoin(Client, SmsNotification.client_id == Client.id)
+            .order_by(SmsNotification.created_at.desc())
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).all()
+        data = [{
+            "id": n.id,
+            "client_name": client_name,
+            "member_id": member_id,
+            "phone_number": n.phone_number,
+            "receipt_id": n.collection_receipt_id,
+            "message": n.message,
+            "status": n.status,
+            "provider": n.provider,
+            "created_at": str(n.created_at),
+        } for n, client_name, member_id in rows]
+        return ApiResponse(success=True, data=data, timestamp=_ts())
+    except Exception as e:
+        logger.error(f"Receipts error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load receipts")
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/staff-locations — event-based map points + last-seen per officer
+# ---------------------------------------------------------------------------
+
+@router.get("/staff-locations", response_model=ApiResponse)
+async def get_staff_locations(db: AsyncSession = Depends(get_db)):
+    """Each field officer's most recent GPS position plus a short trail, built from the GPS
+    already captured at visit check-ins and collections. Event-based (only official actions),
+    never continuous tracking — matches what field officers will accept."""
+    try:
+        officers = (await db.execute(
+            select(User).where(User.role == UserRole.FIELD_OFFICER.value)
+        )).scalars().all()
+
+        data = []
+        for o in officers:
+            points: list[dict] = []
+            visits = (await db.execute(
+                select(VisitCheckin)
+                .where(VisitCheckin.officer_id == o.id, VisitCheckin.gps_latitude.isnot(None))
+                .order_by(VisitCheckin.checked_in_at.desc()).limit(20)
+            )).scalars().all()
+            for v in visits:
+                points.append({"lat": v.gps_latitude, "lng": v.gps_longitude,
+                               "address": v.gps_address, "at": v.checked_in_at, "type": "visit"})
+            cols = (await db.execute(
+                select(Collection)
+                .where(Collection.officer_id == o.id, Collection.gps_latitude.isnot(None))
+                .order_by(Collection.collected_at.desc()).limit(20)
+            )).scalars().all()
+            for c in cols:
+                points.append({"lat": c.gps_latitude, "lng": c.gps_longitude,
+                               "address": c.gps_address, "at": c.collected_at, "type": "collection"})
+            points.sort(key=lambda p: p["at"] or "", reverse=True)
+            data.append({
+                "officer_id": o.id,
+                "name": o.name,
+                "staff_id": o.staff_id,
+                "last_seen": points[0] if points else None,
+                "points": points[:15],
+            })
+        return ApiResponse(success=True, data=data, timestamp=_ts())
+    except Exception as e:
+        logger.error(f"Staff locations error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load staff locations")
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/day-starts — day-start attendance (office-network + selfie proof)
+# ---------------------------------------------------------------------------
+
+@router.get("/day-starts", response_model=ApiResponse)
+async def get_day_starts(
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent day-start records with officer name, network-verification, and selfie — the
+    manager's proof of who actually started their day at the branch."""
+    try:
+        stmt = (
+            select(DayStartRecord, User.name.label("officer_name"), User.staff_id.label("staff_id"))
+            .outerjoin(User, DayStartRecord.officer_id == User.id)
+            .order_by(DayStartRecord.created_at.desc())
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).all()
+        data = [{
+            "id": r.id,
+            "officer_name": officer_name,
+            "staff_id": staff_id,
+            "day_date": r.day_date,
+            "started_at": r.started_at,
+            "source_ip": r.source_ip,
+            "ip_verified": r.ip_verified,
+            "has_selfie": bool(r.selfie_data_uri),
+            "selfie_data_uri": r.selfie_data_uri,
+            "gps_address": r.gps_address,
+        } for r, officer_name, staff_id in rows]
+        return ApiResponse(success=True, data=data, timestamp=_ts())
+    except Exception as e:
+        logger.error(f"Day-starts error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load day-starts")
 
 
 # ------ 11. POST /manager/staff — create new staff member ------

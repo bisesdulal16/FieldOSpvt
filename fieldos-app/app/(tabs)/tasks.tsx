@@ -140,6 +140,11 @@ export default function DueCollectionsScreen() {
               </TouchableOpacity>
             ))}
           </ScrollView>
+
+          <TouchableOpacity style={styles.registerBtn} onPress={() => router.push('/register-borrower')}>
+            <Ionicons name="person-add" size={16} color={colors.white} />
+            <Text style={styles.registerBtnText}>{t('registerBorrower')}</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -213,6 +218,8 @@ const styles = StyleSheet.create({
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: borderRadius.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.gray200, backgroundColor: colors.gray50, marginBottom: spacing.md },
   searchPlaceholder: { fontSize: fontSize.md, color: colors.gray400, flex: 1 },
   filterRow: { marginBottom: spacing.xs },
+  registerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.sm, paddingVertical: spacing.sm, borderRadius: borderRadius.lg, backgroundColor: colors.navy },
+  registerBtnText: { fontSize: fontSize.base, fontWeight: '600', color: colors.white },
   filterChip: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: 9999, borderWidth: 1, borderColor: colors.gray200, marginRight: 6 },
   filterChipActive: { backgroundColor: colors.navy, borderColor: colors.navy },
   filterText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.gray500 },

@@ -24,6 +24,14 @@ export { recordCollection, getTodayCollectionTotal } from './collectionService';
 // Clients
 export { fetchClients, fetchClientDetail, searchLocalClients } from './clientService';
 
+// Day-start (office-network gate + selfie)
+export { startDayWithVerification, captureSelfie } from './dayStartService';
+export type { DayStartResult } from './dayStartService';
+
+// Loan origination (field-officer side)
+export { registerBorrower, submitLoanApplication } from './loanService';
+export type { RegisterBorrowerRequest, RegisteredBorrower, LoanApplicationRequest, LoanApplicationResult } from './loanService';
+
 // Devices
 export { registerDevice as registerDeviceService, sendDeviceHeartbeat } from './deviceService';
 

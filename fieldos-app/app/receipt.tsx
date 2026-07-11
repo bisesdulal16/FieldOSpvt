@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
@@ -35,6 +35,22 @@ export default function DigitalReceiptScreen() {
       if (router.canDismiss()) router.dismissAll();
     } catch { /* no modal to dismiss */ }
     router.navigate(tab);
+  };
+
+  const handleShareReceipt = async () => {
+    const lines = [
+      'FieldOS — Collection Receipt',
+      `Receipt: ${receiptId}`,
+      `Client: ${client.name} (${client.memberId})`,
+      `Amount: NPR ${displayAmount.toLocaleString()}`,
+      `Remaining due: NPR ${Number(remainingDue).toLocaleString()}`,
+      officerName ? `Collected by: ${officerName}` : '',
+      `Date: ${now.toLocaleString()}`,
+      hasPendingSync ? 'Status: Saved offline — pending sync' : 'Status: Synced',
+    ].filter(Boolean);
+    try {
+      await Share.share({ message: lines.join('\n'), title: `Receipt ${receiptId}` });
+    } catch { /* user dismissed the share sheet */ }
   };
 
   useEffect(() => {
@@ -92,7 +108,7 @@ export default function DigitalReceiptScreen() {
         </View>
 
         <View style={styles.actions}>
-          <SecondaryButton onPress={() => alert('Share Receipt feature coming soon.')} icon="share-outline">{t('shareReceipt')}</SecondaryButton>
+          <SecondaryButton onPress={handleShareReceipt} icon="share-outline">{t('shareReceipt')}</SecondaryButton>
           <PrimaryButton onPress={() => goToTab('/(tabs)/tasks')}>{t('returnToTasks')}</PrimaryButton>
           <TouchableOpacity onPress={() => goToTab('/(tabs)/collect')} style={styles.newButton}><Ionicons name="refresh" size={14} color={colors.gray500} /><Text style={styles.newText}>{t('newCollection')}</Text></TouchableOpacity>
         </View>
