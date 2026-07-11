@@ -1,13 +1,15 @@
 import json
 import time
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database import get_db
 from app.models.end_of_day import EndOfDayReport
+from app.models.user import User
 from app.schemas.eod import EODCreate
 from app.schemas.common import ApiResponse
-from app.services import auth_service
+from app.services.audit_helper import write_audit
+from app.deps.auth_deps import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/end-of-day", tags=["End of Day"])
@@ -16,16 +18,11 @@ router = APIRouter(prefix="/end-of-day", tags=["End of Day"])
 @router.post("/", response_model=ApiResponse)
 async def create_eod_report(
     request: EODCreate,
-    authorization: str = Query(None, description="Bearer token"),
     db=Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
-        officer_id = request.officer_id
-        if officer_id is None and authorization:
-            token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-            payload = auth_service.verify_token(token)
-            if payload:
-                officer_id = int(payload.get("sub", 0))
+        officer_id = current_user.id  # from the authenticated token
 
         exceptions_json = json.dumps(request.exceptions) if request.exceptions else None
 
@@ -42,6 +39,13 @@ async def create_eod_report(
         )
         db.add(report)
         await db.flush()
+
+        await write_audit(
+            db, current_user, "end_of_day_submitted",
+            entity_type="end_of_day_report", entity_id=report.id,
+            meta={"report_date": request.report_date,
+                  "total_collections": float(request.total_collections)},
+        )
 
         return ApiResponse(
             success=True,

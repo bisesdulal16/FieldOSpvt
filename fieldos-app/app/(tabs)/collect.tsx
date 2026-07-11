@@ -265,7 +265,10 @@ export default function RecordCollectionScreen() {
               <Text style={styles.clientName}>{client.name}</Text>
               <Text style={styles.clientId}>{client.memberId}</Text>
             </View>
-            <StatusChip label={t('verified')} variant="verified" />
+            <TouchableOpacity onPress={() => { setSelectedClient(null); setCollectionAmount(''); }} style={styles.changeClientBtn}>
+              <Ionicons name="swap-horizontal" size={12} color={colors.navy} />
+              <Text style={styles.changeClientText}>{t('changeClient')}</Text>
+            </TouchableOpacity>
           </View>
           <View style={styles.amountRow}>
             <Text style={styles.amountLabel}>{t('dueAmount')}</Text>
@@ -375,6 +378,8 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: fontSize.md, fontWeight: 'bold', color: colors.white },
   clientName: { fontSize: fontSize.md, fontWeight: '600', color: colors.gray800 },
   clientId: { fontSize: fontSize.sm, color: colors.gray500 },
+  changeClientBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: spacing.sm, borderRadius: borderRadius.sm, backgroundColor: colors.navyBg },
+  changeClientText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.navy },
   amountRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.xs },
   amountLabel: { fontSize: fontSize.base, color: colors.gray500 },
   dueAmount: { fontSize: fontSize.lg, fontWeight: 'bold', color: colors.red },

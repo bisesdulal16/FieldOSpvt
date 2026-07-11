@@ -1,12 +1,15 @@
 import time
 import logging
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database import get_db
 from app.models.visit_checkin import VisitCheckin
+from app.models.user import User
 from app.schemas.visit import VisitCheckinCreate
 from app.schemas.common import ApiResponse
+from app.services.audit_helper import write_audit
+from app.deps.auth_deps import get_current_user
+from app.utils.nepal_time import now_nepal_iso
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/visit-checkins", tags=["Visit Check-ins"])
@@ -16,13 +19,14 @@ router = APIRouter(prefix="/visit-checkins", tags=["Visit Check-ins"])
 async def create_visit_checkin(
     request: VisitCheckinCreate,
     db=Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
-        now_str = datetime.now(timezone.utc).isoformat()
+        now_str = now_nepal_iso()
         visit = VisitCheckin(
             client_id=request.client_id,
             task_id=request.task_id,
-            officer_id=request.officer_id,
+            officer_id=current_user.id,  # from the authenticated token
             visit_purpose=request.visit_purpose,
             gps_latitude=request.gps_latitude,
             gps_longitude=request.gps_longitude,
@@ -33,6 +37,13 @@ async def create_visit_checkin(
         )
         db.add(visit)
         await db.flush()
+
+        await write_audit(
+            db, current_user, "visit_checkin",
+            entity_type="visit_checkin", entity_id=visit.id,
+            meta={"client_id": request.client_id, "gps_address": request.gps_address},
+        )
+        await db.commit()
 
         return ApiResponse(
             success=True,

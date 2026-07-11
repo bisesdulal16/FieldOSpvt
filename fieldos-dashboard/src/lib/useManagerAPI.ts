@@ -22,6 +22,28 @@ export function usePilotAPI<T = unknown>(endpoint: string, enabled = true): ApiS
   return useManagerAPI<T>(`pilot/${endpoint}`, enabled);
 }
 
+export interface Branding {
+  org_name: string;
+  org_name_ne: string;
+  tagline: string;
+  product_suffix: string;
+  primary_color: string;
+  accent_color: string;
+  logo_url: string;
+}
+
+const DEFAULT_BRANDING: Branding = {
+  org_name: 'FieldOS', org_name_ne: '', tagline: 'Nepal',
+  product_suffix: 'Branch Manager Dashboard',
+  primary_color: '#0B1B3A', accent_color: '#F59E0B', logo_url: '',
+};
+
+/** Public white-label branding. Falls back to FieldOS defaults if unavailable. */
+export function useBranding(): Branding {
+  const { data } = useManagerAPI<Branding>('branding/', true);
+  return data || DEFAULT_BRANDING;
+}
+
 export function useManagerAPI<T = unknown>(endpoint: string, enabled = true): ApiState<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(true);

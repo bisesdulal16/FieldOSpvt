@@ -1,6 +1,5 @@
 import time
 import logging
-from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -8,8 +7,10 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.task import TaskAssignment
 from app.models.client import Client
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedResponse
-from app.services import auth_service
+from app.deps.auth_deps import get_current_user
+from app.utils.nepal_time import today_nepal_str
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
@@ -36,22 +37,17 @@ def _task_to_dict(task: TaskAssignment, client: Client | None = None) -> dict:
 async def get_today_tasks(
     status_filter: str | None = Query(None, alias="status", description="Filter by status"),
     type_filter: str | None = Query(None, alias="type", description="Filter by type"),
-    authorization: str = Query(None, description="Bearer token"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
-        user_id = None
-        if authorization:
-            token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-            payload = auth_service.verify_token(token)
-            if payload:
-                user_id = int(payload.get("sub", 0))
+        today_str = today_nepal_str()
+        # Scope to the authenticated officer's own tasks.
+        query = select(TaskAssignment).where(
+            TaskAssignment.task_date == today_str,
+            TaskAssignment.user_id == current_user.id,
+        )
 
-        today_str = str(date.today())
-        query = select(TaskAssignment).where(TaskAssignment.task_date == today_str)
-
-        if user_id:
-            query = query.where(TaskAssignment.user_id == user_id)
         if status_filter:
             query = query.where(TaskAssignment.status == status_filter)
         if type_filter:
@@ -86,6 +82,7 @@ async def get_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         query = select(TaskAssignment)

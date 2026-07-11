@@ -4,8 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database import get_db
 from app.models.promise_to_pay import PromiseToPay
+from app.models.user import User
 from app.schemas.promise import PromiseToPayCreate
 from app.schemas.common import ApiResponse
+from app.services.audit_helper import write_audit
+from app.deps.auth_deps import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/promise-to-pay", tags=["Promise to Pay"])
@@ -15,6 +18,7 @@ router = APIRouter(prefix="/promise-to-pay", tags=["Promise to Pay"])
 async def create_promise(
     request: PromiseToPayCreate,
     db=Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         promise = PromiseToPay(
@@ -28,6 +32,12 @@ async def create_promise(
         )
         db.add(promise)
         await db.flush()
+
+        await write_audit(
+            db, current_user, "promise_to_pay_created",
+            entity_type="promise_to_pay", entity_id=promise.id,
+            meta={"client_id": request.client_id, "promised_amount": float(request.promised_amount)},
+        )
 
         return ApiResponse(
             success=True,

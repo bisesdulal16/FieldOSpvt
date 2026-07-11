@@ -2,16 +2,65 @@ import time
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.database import get_db
 from app.models.client import Client
 from app.models.loan_account import LoanAccount
 from app.models.collection import Collection
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedResponse
+from app.schemas.loan import BorrowerCreate
+from app.services.audit_helper import write_audit
+from app.deps.auth_deps import get_current_user
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/clients", tags=["Clients"])
+router = APIRouter(
+    prefix="/clients",
+    tags=["Clients"],
+    dependencies=[Depends(get_current_user)],  # all client data requires a valid token
+)
+
+
+@router.post("/", response_model=ApiResponse)
+async def register_borrower(
+    request: BorrowerCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Field officer registers a new borrower. Auto-assigns the next member id."""
+    try:
+        count = (await db.execute(select(func.count()).select_from(Client))).scalar() or 0
+        member_id = f"M-{count + 1:03d}"
+        client = Client(
+            member_id=member_id,
+            name=request.name,
+            name_ne=request.name_ne,
+            center_id=request.center_id,
+            center_name=request.center_name,
+            ward=request.ward,
+            loan_cycle=1,
+            outstanding_balance=0.0,
+            due_amount=0.0,
+            overdue_days=0,
+            status="active",
+        )
+        db.add(client)
+        await db.flush()
+        await write_audit(
+            db, current_user, "borrower_registered",
+            entity_type="client", entity_id=member_id,
+            meta={"name": request.name},
+        )
+        await db.commit()
+        return ApiResponse(
+            success=True,
+            data={"id": client.id, "member_id": client.member_id, "name": client.name},
+            timestamp=int(time.time()),
+        )
+    except Exception as e:
+        logger.error(f"Register borrower error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Borrower registration failed")
 
 
 def _client_to_dict(client: Client) -> dict:

@@ -21,4 +21,5 @@ class LoanAccount(Base):
     outstanding_balance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     installment_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     installment_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    term_weeks: Mapped[int] = mapped_column(Integer, default=25, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")

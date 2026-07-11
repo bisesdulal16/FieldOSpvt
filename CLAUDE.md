@@ -1,22 +1,81 @@
 # FieldOS Nepal — CLAUDE.md
 
-> **Context file for Claude Code / Claude AI assistants.**
-> Place this file in the root of your project folder. Claude will read it automatically
-> to understand the project, conventions, and how to help you during deployment and testing.
+> **Canonical project truth for Claude Code / Claude AI assistants.**
+> Read `STATUS.md` alongside this file — it is the honest, verified map of what works, what is
+> broken, and what does not exist. When STATUS.md and any older doc disagree, STATUS.md wins.
 
 ---
+
+## Hard rules (read first)
+
+1. **Close the golden path before opening anything new.** The pilot golden path is:
+   *manager assigns task → officer logs in → sees due client → GPS visit check-in → record
+   collection → digital receipt → collection shows on manager dashboard, attributed to the
+   officer, with an audit entry.* Do not build features off this path until it works end-to-end.
+2. **Loan origination now exists** (backend + dashboard). Lifecycle: officer registers a borrower
+   (`POST /clients/`) → submits application (`POST /loans/applications`, status `pending`) →
+   manager approves (`POST /loans/{loan_id}/approve`, RBAC) → manager disburses
+   (`POST /loans/{loan_id}/disburse`) which generates the weekly repayment schedule and makes the
+   borrower collectable. Approve/Disburse UI is the dashboard's **Loan Approvals** page. The
+   officer-side registration/application *mobile screens* are not built yet (API-only).
+3. **Do not fake offline sync, GPS, audit, or security.** If something is a stub, label it.
+4. **No secrets in git.** `.env` files and `*.db` must be gitignored and untracked (they are
+   currently tracked — fix pending; see STATUS.md §5). Never commit a new one.
+5. **Multi-tenant / white-label SaaS is deferred to post-pilot.** Build one clean, brandable
+   tenant. Do not add tenant tables, per-org theming infra, or billing before one MFI runs the
+   workflow for real. **Branding is single-tenant + env-driven:** `GET /api/v1/branding` returns
+   `ORG_NAME`/`ORG_TAGLINE`/`ORG_PRODUCT_SUFFIX`/colors/`ORG_LOGO_URL` from env; the dashboard
+   (login + sidebar) and mobile login consume it. To rebrand, set the `ORG_*` env vars — no code
+   change. Officer-side origination screens (`app/register-borrower.tsx`, `app/loan-application.tsx`)
+   are built and reachable from the Tasks tab's "Register Borrower" button.
 
 ## Project Identity
 
 - **Name:** FieldOS Nepal
-- **Purpose:** Microfinance field officer management system for Nepal
-- **Stack:** React Native (Expo SDK 54) + FastAPI (Python 3.11+) + Next.js 16
+- **Purpose:** Offline-first **workforce-operations + collections** app for Nepali microfinance
+  field officers, plus a branch-manager dashboard. (NOT a loan-origination / core-banking system.)
+- **Stack:** React Native (Expo SDK 54) + FastAPI (**Python 3.11 / 3.12 — NOT 3.14**) + Next.js 16
 - **Language:** TypeScript (frontend), Python (backend)
-- **i18n:** English + Nepali (590+ translation keys)
+- **i18n:** English + Nepali (~587 translation keys)
 - **Currency:** NPR (Nepali Rupees)
-- **Timezone:** Asia/Kathmandu (UTC+5:45)
+- **Timezone:** Asia/Kathmandu (UTC+5:45) — see the timezone bug in STATUS.md §2 (collections
+  stamped UTC, dashboard filters server-local → "today" numbers wrong).
 - **Brand Colors:** Navy `#0B1B3A`, Orange `#F59E0B`, Green `#16A34A`, Red `#DC2626`
-- **Status:** Pilot-ready — 16 mobile screens, 91 API endpoints, 40+ dashboard views
+- **Actual size (measured 2026-07-10):** ~50 mobile screen files, **90 API endpoints**
+  (~15 on the golden path; the rest serve CBS/security/pilot/AI pages, many of which render
+  static reference content — see STATUS.md §3).
+- **Status:** **Golden path closes end-to-end** (verified 2026-07-10): origination →
+  field collection → receipt → manager dashboard → audit. Security floor is 5/5 for pilot size
+  (auth, RBAC, bcrypt, server-side audit, secrets untracked). Remaining before a real pilot:
+  officer-side origination mobile screens, brandable config, git-history secret scrub,
+  Postgres for multi-branch. See STATUS.md (top) and PILOT.md.
+- **Timezone:** all timestamps + "today" filters use Asia/Kathmandu via `app/utils/nepal_time.py`.
+  Never use `date.today()`/`datetime.utcnow()` for business dates — use `today_nepal_str()` /
+  `now_nepal_iso()` / `to_nepal_iso()`.
+- **Auth:** field endpoints require a JWT via `Depends(get_current_user)`; derive `officer_id`
+  from `current_user.id`, never trust it from the request body. Manager/approval routes use
+  `require_manager_or_admin`. Log sensitive actions with `write_audit(...)` (app/services/audit_helper.py).
+- **Database:** SQLite by default (`DB_TYPE=sqlite`); Postgres-ready and verified end-to-end
+  (`DB_TYPE=postgres` + `DATABASE_URL=postgresql+asyncpg://...?ssl=require`, e.g. Neon free tier).
+  Store timestamps at **seconds precision** (the nepal_time helpers do this) so they fit the
+  `String(30)` columns on Postgres. See DEPLOY.md for hosting (Neon + Fly.io + Vercel + EAS).
+- **Office-network day-start gate:** `POST /day-start` checks the request source IP (X-Forwarded-For
+  aware) against `Branch.office_ip` (comma-separated; empty = disabled) → 403 when off-network, so
+  officers can only start their day at the branch. Captures a front-camera selfie + GPS; manager
+  views it at `/manager/day-starts` → dashboard "Day-Start Attendance". Mobile: `dayStartService.ts`
+  + `handleStartDay` on the Home Start Day button. In prod the manager registers the branch's real
+  public IP; selfies are base64 in `day_start_records` for the pilot (use object storage in prod).
+- **Anti-fraud SMS receipt (the wedge):** every collection auto-sends the client an SMS with the
+  exact recorded amount, **server-side on both the direct-POST and offline-sync paths** (officer
+  can't skip it). `app/services/sms_service.py` — provider `log` (dev, no gateway) or `sparrow`
+  (Nepal prod, set `SMS_PROVIDER`/`SMS_API_TOKEN`). Logged in `sms_notifications`; manager sees it
+  at `/manager/receipts` → dashboard "Client Receipts". Clients are reached by SMS, **not** a
+  smartphone app (rural/basic-phone reality).
+
+## Actual folder names (the older structure diagram below is WRONG)
+
+The three projects live at `fieldos-app/` (mobile), `fieldos-backend/` (FastAPI),
+`fieldos-dashboard/` (Next.js) — **not** `fieldos-nepal-expo/` etc. Use these names.
 
 ---
 
@@ -140,18 +199,22 @@ project-root/
 #### Terminal 1: Backend (port 8000)
 
 ```bash
-cd fieldos-nepal-backend
+cd fieldos-backend
 
-# Create + activate virtual environment
-python3 -m venv venv
+# Create + activate virtual environment — MUST be Python 3.11 or 3.12 (3.14 breaks pydantic)
+python3.12 -m venv venv
 source venv/bin/activate          # Mac/Linux
 # venv\Scripts\activate           # Windows
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Seed the database (creates SQLite DB + demo data)
-python seed.py
+# Seed the canonical PILOT DEMO dataset (DESTRUCTIVE — drops + rebuilds all tables):
+#   1 branch, 2 officers (FO-208/FO-209) + manager (BM-001), 15 Nepali-named borrowers,
+#   loans in mixed states incl. one delinquent, 2 pending applications, 1 approved.
+rm -f fieldos_nepal.db
+python seed_demo.py
+# (Legacy: seed.py + seed_manager.py create a smaller 6-client dataset.)
 
 # Start the server
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -164,7 +227,7 @@ Verify:
 #### Terminal 2: Dashboard (port 3000)
 
 ```bash
-cd fieldos-nepal-dashboard
+cd fieldos-dashboard
 
 npm install
 npm run dev
@@ -175,7 +238,7 @@ Verify: `http://localhost:3000` → Manager dashboard loads
 #### Terminal 3: Mobile App (port 8081)
 
 ```bash
-cd fieldos-nepal-expo
+cd fieldos-app
 
 npm install
 npx expo start
@@ -183,18 +246,27 @@ npx expo start
 
 Verify: Scan the QR code with Expo Go on your phone (same WiFi).
 
-If QR doesn't work (different network):
+**On an emulator/simulator without a paid Expo login, add `--offline`** (the manifest-signing
+step otherwise hangs in non-interactive/CI shells):
 ```bash
-npx expo start --tunnel
+CI=1 EXPO_OFFLINE=1 npx expo start --go --offline
+# Android emulator: forward the backend so the app's 127.0.0.1 reaches your host:
+adb reverse tcp:8000 tcp:8000 && adb reverse tcp:8081 tcp:8081
+adb shell am start -a android.intent.action.VIEW -d "exp://127.0.0.1:8081"
 ```
+
+If QR doesn't work (different network): `npx expo start --tunnel`.
+
+> Note: the app declares `expo-dev-client` + `expo-llm-mediapipe`, so `npx expo start` defaults
+> to a dev build. Use `--go` to force Expo Go (the on-device LLM then falls back to heuristics —
+> fine for the golden path). STATUS.md §6 recommends removing `expo-llm-mediapipe` for pilot.
 
 ### Demo Credentials
 
 | Role | Staff ID | PIN | Used In |
 |------|----------|-----|---------|
-| Field Officer | `FO-208` | `1234` | Mobile app + API |
-| Branch Manager | `BM-001` | (seeded) | Dashboard + API |
-| Admin | `admin` | (seeded) | Full access |
+| Field Officer | `FO-208` | `1234` | Mobile app + API (verified) |
+| Branch Manager | `BM-001` | `1234` | Dashboard + API (verified) |
 
 ### Seed Data Summary
 

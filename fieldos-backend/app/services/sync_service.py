@@ -15,6 +15,8 @@ from app.models.user import User
 from app.models.end_of_day import EndOfDayReport
 from app.models.center_meeting import CenterMeeting
 from app.models.task import TaskAssignment
+from app.services.sms_service import record_and_send_receipt
+from app.utils.nepal_time import to_nepal_iso
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,9 @@ VALID_ENTITY_TYPES = {"client", "loan", "collection", "visit", "visit_checkin", 
 VALID_OPERATIONS = {"create", "update", "delete"}
 
 
-async def process_sync_event(session: AsyncSession, event_data: dict) -> dict[str, Any]:
+async def process_sync_event(
+    session: AsyncSession, event_data: dict, authed_officer_id: int | None = None
+) -> dict[str, Any]:
     entity_type = event_data.get("entity_type", "")
     entity_id = event_data.get("entity_id", "")
     operation = event_data.get("operation", "")
@@ -35,7 +39,7 @@ async def process_sync_event(session: AsyncSession, event_data: dict) -> dict[st
 
     try:
         if operation == "create":
-            result = await _handle_create(session, entity_type, entity_id, payload)
+            result = await _handle_create(session, entity_type, entity_id, payload, authed_officer_id)
         elif operation == "update":
             result = await _handle_update(session, entity_type, entity_id, payload)
         elif operation == "delete":
@@ -48,17 +52,29 @@ async def process_sync_event(session: AsyncSession, event_data: dict) -> dict[st
         return {"entity_type": entity_type, "entity_id": entity_id, "status": "failed", "error": str(e)}
 
 
-async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str, payload: dict) -> dict[str, Any]:
+async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str, payload: dict, authed_officer_id: int | None = None) -> dict[str, Any]:
+    # The authenticated officer always wins over any officer_id in the offline payload.
+    officer_id = authed_officer_id if authed_officer_id is not None else payload.get("officer_id")
     try:
         if entity_type == "collection":
+            amount = float(payload.get("amount", 0))
+            client_id = payload.get("client_id")
+            # Compute the resulting balance from the client's real outstanding, not the payload.
+            outstanding_after = float(payload.get("outstanding_after", 0))
+            client = None
+            if client_id:
+                client_result = await session.execute(select(Client).where(Client.id == client_id))
+                client = client_result.scalar_one_or_none()
+                if client:
+                    outstanding_after = max(0.0, float(client.outstanding_balance) - amount)
             collection = Collection(
                 receipt_id=payload.get("receipt_id", entity_id),
-                client_id=payload.get("client_id"),
+                client_id=client_id,
                 task_id=payload.get("task_id"),
-                officer_id=payload.get("officer_id"),
-                amount=float(payload.get("amount", 0)),
+                officer_id=officer_id,
+                amount=amount,
                 due_amount=float(payload.get("due_amount", 0)),
-                outstanding_after=float(payload.get("outstanding_after", 0)),
+                outstanding_after=outstanding_after,
                 payment_method=payload.get("payment_method", "cash"),
                 face_verified=bool(payload.get("face_verified", False)),
                 is_high_value=bool(payload.get("is_high_value", False)),
@@ -66,34 +82,35 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
                 gps_longitude=payload.get("gps_longitude"),
                 gps_address=payload.get("gps_address"),
                 gps_accuracy_meters=float(payload.get("gps_accuracy_meters")) if payload.get("gps_accuracy_meters") else None,
-                collected_at=payload.get("collected_at"),
+                collected_at=to_nepal_iso(payload.get("collected_at")),
             )
             session.add(collection)
             await session.flush()
 
             # Update client's due_amount and outstanding_balance after collection
-            client_id = payload.get("client_id")
-            amount = float(payload.get("amount", 0))
-            outstanding_after = float(payload.get("outstanding_after", 0))
-            if client_id and outstanding_after:
-                client_result = await session.execute(
-                    select(Client).where(Client.id == client_id)
-                )
-                client = client_result.scalar_one_or_none()
-                if client:
-                    client.outstanding_balance = outstanding_after
-                    client.due_amount = max(0.0, client.due_amount - amount)
+            client_phone = None
+            if client:
+                client.outstanding_balance = outstanding_after
+                client.due_amount = max(0.0, float(client.due_amount) - amount)
+                client_phone = client.phone_number
+
+            # Anti-under-reporting: fire the client receipt on the offline path too, so an
+            # officer can't dodge it by staying offline. (Commits the collection + notification.)
+            await record_and_send_receipt(
+                session, client_id=client_id, phone_number=client_phone,
+                amount=amount, receipt_id=collection.receipt_id,
+            )
 
         elif entity_type in ("visit", "visit_checkin"):
             visit = VisitCheckin(
                 client_id=payload.get("client_id"),
                 task_id=payload.get("task_id"),
-                officer_id=payload.get("officer_id"),
+                officer_id=officer_id,
                 visit_purpose=payload.get("visit_purpose"),
                 gps_latitude=payload.get("gps_latitude"),
                 gps_longitude=payload.get("gps_longitude"),
                 gps_address=payload.get("gps_address"),
-                checked_in_at=payload.get("checked_in_at"),
+                checked_in_at=to_nepal_iso(payload.get("checked_in_at")),
             )
             session.add(visit)
             await session.flush()
@@ -137,7 +154,7 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
         elif entity_type == "eod":
             report = EndOfDayReport(
                 report_date=payload.get("reportDate", payload.get("report_date")),
-                officer_id=payload.get("officerId", payload.get("officer_id")),
+                officer_id=officer_id,
                 total_collections=float(payload.get("totalCollections", payload.get("total_collections", 0))),
                 total_visits=int(payload.get("totalVisits", payload.get("total_visits", 0))),
                 pending_count=int(payload.get("pendingCount", payload.get("pending_count", 0))),
@@ -155,7 +172,7 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
                 center_name=payload.get("centerName", payload.get("center_name")),
                 meeting_date=payload.get("meetingDate", payload.get("meeting_date")),
                 location=payload.get("location"),
-                officer_id=payload.get("officerId", payload.get("officer_id")),
+                officer_id=officer_id,
                 total_members=int(payload.get("totalMembers", payload.get("total_members", 0))),
             )
             session.add(meeting)

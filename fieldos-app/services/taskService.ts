@@ -70,10 +70,35 @@ export async function fetchAssignedTasks(req?: FetchTasksRequest): Promise<ApiRe
   console.log('[Tasks] response body:', text?.substring(0, 1000));
 
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    // The API returns snake_case (client_id, client_name, member_id). Normalize to the
+    // camelCase TaskAssignment shape the app relies on — otherwise selectedClient.clientId
+    // is undefined and Record Collection fails with "Client information missing".
+    if (parsed && Array.isArray(parsed.data)) {
+      parsed.data = parsed.data.map(normalizeTask);
+    }
+    return parsed;
   } catch {
     return { success: false, data: [], error: 'Invalid response from server', timestamp: new Date().toISOString() };
   }
+}
+
+/** Map a raw API task (snake_case) to the app's camelCase TaskAssignment, keeping raw fields. */
+function normalizeTask(raw: any): TaskAssignment {
+  return {
+    ...raw,
+    id: raw.id,
+    taskId: raw.id,
+    clientId: raw.clientId ?? raw.client_id,
+    clientName: raw.clientName ?? raw.client_name,
+    clientMemberId: raw.clientMemberId ?? raw.member_id,
+    taskType: raw.taskType ?? raw.task_type,
+    taskDate: raw.taskDate ?? raw.task_date,
+    amount: raw.amount,
+    status: raw.status,
+    priority: raw.priority,
+    overdueDays: raw.overdueDays ?? raw.overdue_days ?? 0,
+  } as TaskAssignment;
 }
 
 /**

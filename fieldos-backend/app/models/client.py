@@ -22,6 +22,7 @@ class Client(Base):
     member_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     name_ne: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     center_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     center_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     ward: Mapped[str | None] = mapped_column(String(50), nullable=True)
