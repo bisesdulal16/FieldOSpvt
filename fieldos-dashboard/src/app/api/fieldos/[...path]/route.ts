@@ -12,7 +12,7 @@ export async function GET(
   // Prepend 'manager/' for bare paths that map to the manager router
   // (dashboard, staff, visits, collections, par-followup, ptp-today, exceptions, eod-reviews, sync-status, audit-logs)
   // Don't auto-prefix if the path already contains a module prefix
-  const knownModules = ['cbs', 'security', 'pilot', 'auth', 'mobile', 'voice-ai', 'manager', 'loans', 'clients', 'branding'];
+  const knownModules = ['cbs', 'security', 'pilot', 'auth', 'mobile', 'voice-ai', 'manager', 'loans', 'clients', 'branding', 'data'];
   if (!knownModules.some((m) => apiPath === m || apiPath.startsWith(m + '/'))) {
     apiPath = 'manager/' + apiPath;
   }
@@ -66,7 +66,7 @@ async function proxyHandler(
   const { path } = await ctx.params;
   let apiPath = path.join('/');
 
-  const knownModules = ['cbs', 'security', 'pilot', 'auth', 'mobile', 'voice-ai', 'manager', 'loans', 'clients', 'branding'];
+  const knownModules = ['cbs', 'security', 'pilot', 'auth', 'mobile', 'voice-ai', 'manager', 'loans', 'clients', 'branding', 'data'];
   if (!knownModules.some((m) => apiPath === m || apiPath.startsWith(m + '/'))) {
     apiPath = 'manager/' + apiPath;
   }

@@ -324,6 +324,7 @@ async def get_staff(db: AsyncSession = Depends(get_db)):
             day_started = len(user_tasks) > 0 or visits_count > 0
 
             staff_data.append({
+                "id": staff.id,
                 "staff_id": staff.staff_id,
                 "name": staff.name,
                 "role": staff.role,
@@ -1044,6 +1045,301 @@ async def get_receipt_notifications(
     except Exception as e:
         logger.error(f"Receipts error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load receipts")
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/sync-events — full sync-queue log (not just counts)
+# ---------------------------------------------------------------------------
+
+@router.get("/sync-events", response_model=ApiResponse)
+async def sync_events(
+    status_filter: str | None = Query(None, alias="status", description="pending|completed|failed"),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """The full sync-queue log — every offline record's sync attempt with status, retry count,
+    and error. Lets the manager see exactly what synced, what's pending, and what failed and why."""
+    try:
+        q = select(SyncEvent).order_by(SyncEvent.id.desc())
+        if status_filter:
+            q = q.where(SyncEvent.status == status_filter)
+        rows = (await db.execute(q.limit(limit))).scalars().all()
+        counts = {"pending": 0, "completed": 0, "failed": 0}
+        for r in (await db.execute(select(SyncEvent))).scalars().all():
+            counts[r.status] = counts.get(r.status, 0) + 1
+        data = {
+            "counts": counts,
+            "events": [{
+                "id": r.id,
+                "entity_type": r.entity_type,
+                "entity_id": r.entity_id,
+                "operation": r.operation,
+                "status": r.status,
+                "retry_count": r.retry_count,
+                "last_error": r.last_error,
+                "created_at": str(r.created_at),
+                "synced_at": r.synced_at,
+            } for r in rows],
+        }
+        return ApiResponse(success=True, data=data, timestamp=_ts())
+    except Exception as e:
+        logger.error(f"Sync events error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load sync events")
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/pilot-metrics — the pilot success / sales-data rollup
+# ---------------------------------------------------------------------------
+
+@router.get("/pilot-metrics", response_model=ApiResponse)
+async def pilot_metrics(db: AsyncSession = Depends(get_db)):
+    """The numbers that decide whether the pilot succeeded and that become the sales deck:
+    adoption, throughput, anti-fraud proof, and reliability."""
+    try:
+        today = _today_str()
+
+        officers = (await db.execute(
+            select(User).where(User.role == UserRole.FIELD_OFFICER.value)
+        )).scalars().all()
+        officer_ids = {o.id for o in officers}
+
+        cols_today = (await db.execute(
+            select(Collection).where(Collection.collected_at.like(f"{today}%"))
+        )).scalars().all()
+        visits_today = (await db.execute(
+            select(VisitCheckin).where(VisitCheckin.checked_in_at.like(f"{today}%"))
+        )).scalars().all()
+        day_starts_today = (await db.execute(
+            select(DayStartRecord).where(DayStartRecord.day_date == today)
+        )).scalars().all()
+
+        active_ids = {c.officer_id for c in cols_today} | {v.officer_id for v in visits_today} \
+            | {d.officer_id for d in day_starts_today}
+        active_ids &= officer_ids
+
+        # Anti-fraud proof
+        receipts_sent = (await db.execute(
+            select(func.count()).select_from(SmsNotification).where(SmsNotification.status == "sent")
+        )).scalar() or 0
+        visited_pairs = {(v.officer_id, v.client_id) for v in visits_today}
+        anomalies_today = sum(
+            (1 if c.gps_latitude is None else 0) +
+            (1 if (c.officer_id, c.client_id) not in visited_pairs else 0)
+            for c in cols_today
+        )
+
+        collections_alltime = (await db.execute(
+            select(func.coalesce(func.sum(Collection.amount), 0))
+        )).scalar() or 0
+        pending_sync = (await db.execute(
+            select(func.count()).select_from(SyncEvent).where(SyncEvent.status == "pending")
+        )).scalar() or 0
+
+        total_officers = len(officers)
+        data = {
+            "date": today,
+            # Adoption
+            "officers_total": total_officers,
+            "officers_active_today": len(active_ids),
+            "officers_active_pct": round(len(active_ids) / total_officers * 100, 1) if total_officers else 0.0,
+            "day_starts_today": len(day_starts_today),
+            "day_starts_verified_today": sum(1 for d in day_starts_today if d.ip_verified),
+            # Throughput
+            "collections_today_count": len(cols_today),
+            "collections_today_npr": round(sum(c.amount for c in cols_today), 2),
+            "collections_alltime_npr": round(float(collections_alltime), 2),
+            "visits_today_count": len(visits_today),
+            # Anti-fraud proof
+            "receipts_sent_total": receipts_sent,
+            "anomalies_today": anomalies_today,
+            # Reliability
+            "pending_sync": pending_sync,
+        }
+        return ApiResponse(success=True, data=data, timestamp=_ts())
+    except Exception as e:
+        logger.error(f"Pilot metrics error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load pilot metrics")
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/officer-activity — one officer's full timeline (where + what)
+# ---------------------------------------------------------------------------
+
+@router.get("/officer-activity", response_model=ApiResponse)
+async def officer_activity(
+    officer_id: int = Query(...),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """A single officer's complete, chronological activity — day-starts, visits (with location),
+    collections (amount + location), and audited actions. This is the "select a person, see
+    everywhere they were and everything they did" view."""
+    try:
+        officer = (await db.execute(select(User).where(User.id == officer_id))).scalar_one_or_none()
+        if not officer:
+            raise HTTPException(status_code=404, detail="Officer not found")
+        clients = {c.id: c for c in (await db.execute(select(Client))).scalars().all()}
+        cname = lambda cid: clients[cid].name if cid in clients else (f"#{cid}" if cid else None)
+
+        events: list[dict] = []
+
+        for r in (await db.execute(
+            select(DayStartRecord).where(DayStartRecord.officer_id == officer_id)
+            .order_by(DayStartRecord.id.desc()).limit(limit)
+        )).scalars().all():
+            events.append({"type": "day_start", "at": r.started_at,
+                           "title": "Started day",
+                           "detail": ("Office network verified" if r.ip_verified else "Network unverified") + (" · selfie" if r.selfie_data_uri else ""),
+                           "address": r.gps_address, "amount": None})
+
+        for v in (await db.execute(
+            select(VisitCheckin).where(VisitCheckin.officer_id == officer_id)
+            .order_by(VisitCheckin.id.desc()).limit(limit)
+        )).scalars().all():
+            events.append({"type": "visit", "at": v.checked_in_at,
+                           "title": f"Visited {cname(v.client_id) or 'client'}",
+                           "detail": v.visit_purpose or "visit",
+                           "address": v.gps_address,
+                           "lat": v.gps_latitude, "lng": v.gps_longitude, "amount": None})
+
+        for c in (await db.execute(
+            select(Collection).where(Collection.officer_id == officer_id)
+            .order_by(Collection.id.desc()).limit(limit)
+        )).scalars().all():
+            events.append({"type": "collection", "at": c.collected_at,
+                           "title": f"Collected from {cname(c.client_id) or 'client'}",
+                           "detail": f"{c.payment_method or 'cash'} · {c.receipt_id}",
+                           "address": c.gps_address,
+                           "lat": c.gps_latitude, "lng": c.gps_longitude, "amount": c.amount})
+
+        for a in (await db.execute(
+            select(AuditLog).where(AuditLog.user_id == officer_id)
+            .order_by(AuditLog.id.desc()).limit(limit)
+        )).scalars().all():
+            events.append({"type": "audit", "at": str(a.created_at),
+                           "title": a.action_type.replace("_", " "),
+                           "detail": f"{a.entity_type or ''} {a.entity_id or ''}".strip(),
+                           "address": None, "amount": None})
+
+        events.sort(key=lambda e: e["at"] or "", reverse=True)
+        return ApiResponse(
+            success=True,
+            data={"officer": {"id": officer.id, "name": officer.name, "staff_id": officer.staff_id,
+                              "role": officer.role},
+                  "events": events[:limit]},
+            timestamp=_ts(),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Officer activity error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load officer activity")
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/cash-reconciliation — expected cash vs digital per officer today
+# ---------------------------------------------------------------------------
+
+@router.get("/cash-reconciliation", response_model=ApiResponse)
+async def cash_reconciliation(db: AsyncSession = Depends(get_db)):
+    """Per officer today: total collected, cash (physical cash the officer should be holding),
+    and digital. The manager counts the cash in hand and compares it to 'cash' here — any gap is
+    leakage or a recording error. All figures are the server's truth from recorded collections."""
+    try:
+        today = _today_str()
+        officers = (await db.execute(
+            select(User).where(User.role == UserRole.FIELD_OFFICER.value)
+        )).scalars().all()
+        data = []
+        for o in officers:
+            cols = (await db.execute(
+                select(Collection).where(
+                    Collection.officer_id == o.id,
+                    Collection.collected_at.like(f"{today}%"),
+                )
+            )).scalars().all()
+            total = sum(c.amount for c in cols)
+            cash = sum(c.amount for c in cols if (c.payment_method or "cash") == "cash")
+            data.append({
+                "officer_id": o.id, "name": o.name, "staff_id": o.staff_id,
+                "collections": len(cols),
+                "total_npr": round(total, 2),
+                "cash_npr": round(cash, 2),          # physical cash the officer should hold
+                "digital_npr": round(total - cash, 2),
+            })
+        return ApiResponse(success=True, data=data, timestamp=_ts())
+    except Exception as e:
+        logger.error(f"Cash reconciliation error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load cash reconciliation")
+
+
+# ---------------------------------------------------------------------------
+# GET /manager/anomalies — rule-based fraud/quality flags computed today
+# ---------------------------------------------------------------------------
+
+@router.get("/anomalies", response_model=ApiResponse)
+async def anomalies(db: AsyncSession = Depends(get_db)):
+    """Automatic flags on today's activity, so the manager doesn't have to eyeball everything:
+      - collection_without_visit: a payment recorded with no visit check-in for that client/officer
+      - collection_without_gps:   a collection saved with location off (possible mock/masking)
+      - eod_mismatch:             the officer's End-of-Day total ≠ the actual sum of collections
+    """
+    try:
+        today = _today_str()
+        officers = {o.id: o for o in (await db.execute(select(User))).scalars().all()}
+        clients = {c.id: c for c in (await db.execute(select(Client))).scalars().all()}
+
+        def oname(oid): return officers[oid].name if oid in officers else f"#{oid}"
+        def cname(cid): return clients[cid].name if cid in clients else f"#{cid}"
+
+        cols = (await db.execute(
+            select(Collection).where(Collection.collected_at.like(f"{today}%"))
+        )).scalars().all()
+        visits = (await db.execute(
+            select(VisitCheckin).where(VisitCheckin.checked_in_at.like(f"{today}%"))
+        )).scalars().all()
+        visited = {(v.officer_id, v.client_id) for v in visits}
+
+        flags = []
+        for c in cols:
+            if c.gps_latitude is None:
+                flags.append({
+                    "type": "collection_without_gps", "severity": "medium",
+                    "officer": oname(c.officer_id), "client": cname(c.client_id),
+                    "receipt_id": c.receipt_id, "amount": c.amount,
+                    "detail": "Collection recorded with location off",
+                })
+            if c.officer_id and c.client_id and (c.officer_id, c.client_id) not in visited:
+                flags.append({
+                    "type": "collection_without_visit", "severity": "high",
+                    "officer": oname(c.officer_id), "client": cname(c.client_id),
+                    "receipt_id": c.receipt_id, "amount": c.amount,
+                    "detail": "Payment recorded but no visit check-in for this client today",
+                })
+
+        # EOD declared vs actual
+        eods = (await db.execute(
+            select(EndOfDayReport).where(EndOfDayReport.report_date == today)
+        )).scalars().all()
+        actual_by_officer: dict[int, float] = {}
+        for c in cols:
+            actual_by_officer[c.officer_id] = actual_by_officer.get(c.officer_id, 0.0) + c.amount
+        for e in eods:
+            actual = actual_by_officer.get(e.officer_id, 0.0)
+            if abs((e.total_collections or 0) - actual) > 1.0:
+                flags.append({
+                    "type": "eod_mismatch", "severity": "high",
+                    "officer": oname(e.officer_id), "client": None, "receipt_id": None,
+                    "amount": None,
+                    "detail": f"EOD declared NPR {e.total_collections:,.0f} but actual collections were NPR {actual:,.0f}",
+                })
+
+        order = {"high": 0, "medium": 1, "low": 2}
+        flags.sort(key=lambda f: order.get(f["severity"], 3))
+        return ApiResponse(success=True, data=flags, timestamp=_ts())
+    except Exception as e:
+        logger.error(f"Anomalies error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load anomalies")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+
+// Leaflet needs `window`, so the map is client-only (no SSR).
+const StaffMap = dynamic(() => import('@/components/StaffMap'), {
+  ssr: false,
+  loading: () => <div className="h-[480px] w-full rounded-xl bg-gray-100 flex items-center justify-center text-sm text-gray-500">Loading map…</div>,
+});
 import {
   LayoutDashboard,
   Users,
@@ -116,6 +123,11 @@ type ViewId =
   | 'receipts'
   | 'day-starts'
   | 'staff-map'
+  | 'cash-anomalies'
+  | 'officer-activity'
+  | 'pilot-kpis'
+  | 'data-sync'
+  | 'sync-log'
   | 'announcements';
 
 interface StoredUser {
@@ -141,6 +153,12 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'loan-approvals', label: 'Loan Approvals', icon: <BadgeCheck className="h-5 w-5" /> },
   { id: 'receipts', label: 'Client Receipts', icon: <Send className="h-5 w-5" /> },
   { id: 'day-starts', label: 'Day-Start Attendance', icon: <MapPin className="h-5 w-5" /> },
+  { id: 'staff-map', label: 'Staff Map', icon: <MapPin className="h-5 w-5" /> },
+  { id: 'cash-anomalies', label: 'Cash & Anomalies', icon: <ShieldAlert className="h-5 w-5" /> },
+  { id: 'officer-activity', label: 'Officer Activity', icon: <Users className="h-5 w-5" /> },
+  { id: 'pilot-kpis', label: 'Pilot Metrics', icon: <BarChart3 className="h-5 w-5" /> },
+  { id: 'data-sync', label: 'CBS Data Sync', icon: <GitCompareArrows className="h-5 w-5" /> },
+  { id: 'sync-log', label: 'Sync Log', icon: <RefreshCw className="h-5 w-5" /> },
   { id: 'assign-task', label: 'Assign Task', icon: <Plus className="h-5 w-5" /> },
   { id: 'announcements', label: 'Announcements', icon: <Bell className="h-5 w-5" /> },
 ];
@@ -188,6 +206,25 @@ const PILOT_NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = 
 ];
 
 const ALL_NAV_ITEMS = [...NAV_ITEMS, ...AI_NAV_ITEMS, ...CBS_NAV_ITEMS, ...SECURITY_NAV_ITEMS, ...PILOT_NAV_ITEMS];
+
+// Views whose content is static reference/demo material, not live-measured data. A banner
+// makes that explicit so a technical reviewer is never misled into thinking these are live.
+const REFERENCE_VIEWS = new Set<ViewId>([...SECURITY_NAV_ITEMS, ...PILOT_NAV_ITEMS].map(i => i.id));
+const DEMO_DATA_VIEWS = new Set<ViewId>(CBS_NAV_ITEMS.map(i => i.id));
+
+// Pilot mode (default ON) hides off-plan reference/demo sections so the institution only sees
+// the real operational features. Set NEXT_PUBLIC_PILOT_MODE=false to show everything.
+const PILOT_MODE = process.env.NEXT_PUBLIC_PILOT_MODE !== 'false';
+
+function ReferenceBanner({ kind }: { kind: 'reference' | 'demo' }) {
+  return (
+    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+      {kind === 'reference'
+        ? 'Reference material — this page shows documentation and examples, not live-measured data from your branch.'
+        : 'Demo data — the CBS integration runs on seeded/imported data. There is no live core-banking connection in the pilot.'}
+    </div>
+  );
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -5012,6 +5049,398 @@ function PilotAgreementsView({ enabled }: { enabled: boolean }) {
 
 // ── Assign Task View ──────────────────────────────────────────────
 
+function SyncLogView({ enabled }: { enabled: boolean }) {
+  const { data, loading, error } = useManagerAPI<any>('sync-events', enabled);
+  const counts = data?.counts || { pending: 0, completed: 0, failed: 0 };
+  const events = data?.events || [];
+  const badge: Record<string, string> = {
+    completed: 'bg-green-100 text-green-700',
+    pending: 'bg-amber-100 text-amber-700',
+    failed: 'bg-red-100 text-red-700',
+    processing: 'bg-blue-100 text-blue-700',
+  };
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Sync Log</h1>
+        <p className="text-sm text-gray-500 mt-1">Every offline record&apos;s sync attempt — what synced, what&apos;s still pending, and what failed and why. Nothing disappears silently.</p>
+      </div>
+      {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Completed</p><p className="mt-1 text-2xl font-bold text-green-700">{counts.completed}</p></div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Pending</p><p className="mt-1 text-2xl font-bold text-amber-600">{counts.pending}</p></div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Failed</p><p className="mt-1 text-2xl font-bold text-red-700">{counts.failed}</p></div>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle>Recent sync events ({events.length})</CardTitle></CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : events.length === 0 ? (
+            <p className="text-sm text-gray-500">No sync events yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[560px]">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-200">
+                    <th className="py-2 pr-4 font-medium">Status</th>
+                    <th className="py-2 pr-4 font-medium">Type</th>
+                    <th className="py-2 pr-4 font-medium">Operation</th>
+                    <th className="py-2 pr-4 font-medium">Entity</th>
+                    <th className="py-2 pr-4 font-medium">Retries</th>
+                    <th className="py-2 pr-4 font-medium">When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.map((e: any) => (
+                    <tr key={e.id} className="border-b border-gray-100 align-top">
+                      <td className="py-2 pr-4"><span className={`text-xs font-medium px-2 py-0.5 rounded ${badge[e.status] || 'bg-gray-100 text-gray-600'}`}>{e.status}</span></td>
+                      <td className="py-2 pr-4 text-gray-700 whitespace-nowrap">{e.entity_type}</td>
+                      <td className="py-2 pr-4 text-gray-500">{e.operation}</td>
+                      <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">{e.entity_id}{e.last_error ? <span className="block text-red-600 text-xs">{e.last_error}</span> : ''}</td>
+                      <td className="py-2 pr-4 text-gray-500">{e.retry_count}</td>
+                      <td className="py-2 pr-4 text-gray-400 whitespace-nowrap text-xs">{String(e.created_at).slice(0, 16)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function DataSyncView({ enabled }: { enabled: boolean }) {
+  const [importing, setImporting] = React.useState(false);
+  const [exporting, setExporting] = React.useState(false);
+  const [result, setResult] = React.useState<string>('');
+  const HEADER = 'member_id,name,phone_number,center_id,center_name,ward,outstanding_balance,due_amount,next_installment_date,overdue_days';
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true); setResult('');
+    try {
+      const csv_text = await file.text();
+      const res = await apiMutation<any>('data/import-clients', 'POST', { csv_text });
+      if (res.success) {
+        const d = res.data;
+        setResult(`Imported: ${d.created} created, ${d.updated} updated${d.error_count ? `, ${d.error_count} errors` : ''}.`);
+      } else {
+        setResult(res.error || 'Import failed');
+      }
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
+  const downloadPostings = async () => {
+    setExporting(true); setResult('');
+    try {
+      const res = await apiMutation<any>('data/postings', 'GET');
+      if (res.success) {
+        const d = res.data;
+        const blob = new Blob([d.csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = d.filename; a.click();
+        URL.revokeObjectURL(url);
+        setResult(`Exported ${d.count} collections → ${d.filename}`);
+      } else {
+        setResult(res.error || 'Export failed');
+      }
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">CBS Data Sync</h1>
+        <p className="text-sm text-gray-500 mt-1">Bring the institution&apos;s client/loan list in from their core-banking export, and send the day&apos;s collections back out as a postings file. Read-first — FieldOS never writes to the CBS directly.</p>
+      </div>
+
+      {result && <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-800">{result}</div>}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle>Import clients from CBS</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-gray-500">Upload a CSV exported from the CBS. Existing members (matched by <code>member_id</code>) are updated; new ones are created.</p>
+            <p className="text-xs text-gray-400 break-all">Expected columns:<br /><code>{HEADER}</code></p>
+            <label className="inline-flex items-center gap-2 rounded-md bg-[#0B1B3A] text-white text-sm font-medium px-4 py-2 cursor-pointer">
+              {importing ? 'Importing…' : 'Choose CSV file'}
+              <input type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} disabled={importing} />
+            </label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Export collections → postings file</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-gray-500">Download today&apos;s collections as a CSV the finance team imports into the CBS. Each row has receipt, member, amount, method, officer, and time.</p>
+            <button onClick={downloadPostings} disabled={exporting}
+              className="rounded-md bg-[#16A34A] text-white text-sm font-medium px-4 py-2 disabled:opacity-50">
+              {exporting ? 'Preparing…' : "Download today's postings CSV"}
+            </button>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function PilotKpisView({ enabled }: { enabled: boolean }) {
+  const { data, loading, error } = useManagerAPI<any>('pilot-metrics', enabled);
+  const m = data || {};
+
+  const Stat = ({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) => (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</p>
+      <p className="mt-1 text-2xl font-bold text-gray-900">{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div className="space-y-2">
+      <h2 className="text-sm font-semibold text-gray-700">{title}</h2>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{children}</div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Pilot Metrics</h1>
+        <p className="text-sm text-gray-500 mt-1">The numbers that decide whether the pilot succeeded — adoption, throughput, anti-fraud proof, reliability. Capture these weekly for your case study.</p>
+      </div>
+      {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading…</p>
+      ) : (
+        <>
+          <Section title="Adoption">
+            <Stat label="Officers active today" value={`${m.officers_active_today ?? 0}/${m.officers_total ?? 0}`} sub={`${m.officers_active_pct ?? 0}% of field officers`} />
+            <Stat label="Day-starts today" value={m.day_starts_today ?? 0} sub={`${m.day_starts_verified_today ?? 0} office-network verified`} />
+            <Stat label="Visits today" value={m.visits_today_count ?? 0} />
+            <Stat label="Collections today" value={m.collections_today_count ?? 0} sub="entries" />
+          </Section>
+          <Section title="Throughput">
+            <Stat label="Collected today" value={`NPR ${Number(m.collections_today_npr ?? 0).toLocaleString()}`} />
+            <Stat label="Collected all-time" value={`NPR ${Number(m.collections_alltime_npr ?? 0).toLocaleString()}`} />
+          </Section>
+          <Section title="Anti-fraud proof">
+            <Stat label="Client receipts sent" value={m.receipts_sent_total ?? 0} sub="SMS the officer can't fake" />
+            <Stat label="Anomalies flagged today" value={m.anomalies_today ?? 0} sub="no-visit / no-GPS collections" />
+          </Section>
+          <Section title="Reliability">
+            <Stat label="Pending sync" value={m.pending_sync ?? 0} sub="unsynced offline records" />
+          </Section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function OfficerActivityView({ enabled }: { enabled: boolean }) {
+  const { data: staff } = useManagerAPI<any[]>('staff', enabled);
+  const officers = (staff || []).filter((s: any) => s.role === 'field_officer');
+  const [selectedId, setSelectedId] = React.useState<number | null>(null);
+  // Default to the first officer once the list loads.
+  React.useEffect(() => {
+    if (selectedId == null && officers.length) setSelectedId(officers[0].id);
+  }, [officers, selectedId]);
+
+  const { data, loading } = useManagerAPI<any>(
+    `officer-activity?officer_id=${selectedId}`, enabled && selectedId != null);
+  const events = data?.events || [];
+
+  const icon: Record<string, string> = { day_start: '🟢', visit: '📍', collection: '💵', audit: '🧾' };
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Officer Activity</h1>
+          <p className="text-sm text-gray-500 mt-1">Pick an officer to see everywhere they were and everything they did — their full, timestamped trail.</p>
+        </div>
+        <select
+          className="border border-gray-300 rounded-md px-3 py-2 text-sm min-w-[220px]"
+          value={selectedId ?? ''}
+          onChange={e => setSelectedId(Number(e.target.value))}
+        >
+          {officers.map((o: any) => (
+            <option key={o.id} value={o.id}>{o.name} — {o.staff_id}</option>
+          ))}
+        </select>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{data?.officer ? `${data.officer.name} · ${data.officer.staff_id}` : 'Timeline'} — {events.length} events</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : events.length === 0 ? (
+            <p className="text-sm text-gray-500">No activity recorded for this officer.</p>
+          ) : (
+            <div className="space-y-1">
+              {events.map((e: any, i: number) => (
+                <div key={i} className="flex items-start gap-2 sm:gap-3 py-2 border-b border-gray-100">
+                  <span className="text-lg shrink-0" aria-hidden>{icon[e.type] || '•'}</span>
+                  <div className="w-16 sm:w-28 shrink-0 text-xs text-gray-500 pt-0.5">
+                    {e.at ? `${e.at.slice(5, 10)}` : ''}<br />{e.at ? e.at.slice(11, 16) : ''}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900">
+                      {e.title}{e.amount ? <span className="text-green-700"> · NPR {Number(e.amount).toLocaleString()}</span> : ''}
+                    </p>
+                    <p className="text-sm text-gray-500 break-words">{[e.detail, e.address].filter(Boolean).join(' · ')}</p>
+                  </div>
+                  <span className="hidden sm:block text-[10px] uppercase tracking-wide text-gray-400 shrink-0 pt-1">{e.type.replace('_', ' ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function CashAnomaliesView({ enabled }: { enabled: boolean }) {
+  const { data: cash } = useManagerAPI<any[]>('cash-reconciliation', enabled);
+  const { data: flags, loading, error } = useManagerAPI<any[]>('anomalies', enabled);
+  const cashRows = (cash || []).filter((o: any) => o.collections > 0);
+  const anomalies = flags || [];
+  const sevStyle: Record<string, string> = {
+    high: 'bg-red-100 text-red-700',
+    medium: 'bg-amber-100 text-amber-700',
+    low: 'bg-gray-100 text-gray-600',
+  };
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Cash &amp; Anomalies</h1>
+        <p className="text-sm text-gray-500 mt-1">Count each officer&apos;s physical cash against what the system recorded, and review automatic fraud/quality flags on today&apos;s activity.</p>
+      </div>
+      {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+
+      <Card>
+        <CardHeader><CardTitle>Cash Reconciliation — today</CardTitle></CardHeader>
+        <CardContent>
+          {cashRows.length === 0 ? (
+            <p className="text-sm text-gray-500">No collections yet today.</p>
+          ) : (
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[520px]">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-200">
+                  <th className="py-2 pr-4 font-medium">Officer</th>
+                  <th className="py-2 pr-4 font-medium">Collections</th>
+                  <th className="py-2 pr-4 font-medium">Cash to hold</th>
+                  <th className="py-2 pr-4 font-medium">Digital</th>
+                  <th className="py-2 pr-4 font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cashRows.map((o: any) => (
+                  <tr key={o.officer_id} className="border-b border-gray-100">
+                    <td className="py-2 pr-4 font-medium text-gray-900 whitespace-nowrap">{o.name} <span className="text-gray-400">· {o.staff_id}</span></td>
+                    <td className="py-2 pr-4 text-gray-600">{o.collections}</td>
+                    <td className="py-2 pr-4 font-semibold text-gray-900 whitespace-nowrap">NPR {Number(o.cash_npr).toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">NPR {Number(o.digital_npr).toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">NPR {Number(o.total_npr).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Anomaly Flags — today ({anomalies.length})</CardTitle></CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : anomalies.length === 0 ? (
+            <p className="text-sm text-gray-500">No anomalies flagged. 🎉</p>
+          ) : (
+            <div className="space-y-2">
+              {anomalies.map((f: any, i: number) => (
+                <div key={i} className="flex items-start gap-3 border border-gray-200 rounded-md px-4 py-3">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded shrink-0 ${sevStyle[f.severity] || 'bg-gray-100'}`}>{f.severity}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{f.type.replace(/_/g, ' ')}{f.amount ? ` · NPR ${Number(f.amount).toLocaleString()}` : ''}</p>
+                    <p className="text-sm text-gray-500">{f.officer}{f.client ? ` → ${f.client}` : ''} · {f.detail}{f.receipt_id ? ` · ${f.receipt_id}` : ''}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function StaffMapView({ enabled }: { enabled: boolean }) {
+  const { data, loading, error } = useManagerAPI<any[]>('staff-locations', enabled);
+  const officers = data || [];
+
+  return (
+    <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Staff Map</h1>
+        <p className="text-sm text-gray-500 mt-1">Where each officer was last seen, from the GPS captured at their visits and collections. Event-based (official actions only) — not continuous tracking.</p>
+      </div>
+
+      {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+
+      <Card>
+        <CardContent className="pt-6">
+          {loading ? (
+            <div className="h-[480px] w-full rounded-xl bg-gray-100 flex items-center justify-center text-sm text-gray-500">Loading…</div>
+          ) : (
+            enabled && <StaffMap officers={officers} />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Last seen</CardTitle></CardHeader>
+        <CardContent>
+          {officers.length === 0 ? (
+            <p className="text-sm text-gray-500">No location data yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {officers.map((o: any) => (
+                <div key={o.officer_id} className="flex items-center justify-between border-b border-gray-100 py-2 text-sm">
+                  <span className="font-medium text-gray-900">{o.name} <span className="text-gray-400">· {o.staff_id}</span></span>
+                  <span className="text-gray-600">
+                    {o.last_seen ? `${o.last_seen.address || 'unknown'} · ${o.last_seen.at?.slice(11, 16)} · ${o.points.length} points` : 'never'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function DayStartsView({ enabled }: { enabled: boolean }) {
   const { data, loading, error } = useManagerAPI<any[]>('day-starts', enabled);
   const rows = data || [];
@@ -5637,6 +6066,18 @@ export default function DashboardPage() {
         return <ClientReceiptsView enabled={activeView === 'receipts'} />;
       case 'day-starts':
         return <DayStartsView enabled={activeView === 'day-starts'} />;
+      case 'staff-map':
+        return <StaffMapView enabled={activeView === 'staff-map'} />;
+      case 'cash-anomalies':
+        return <CashAnomaliesView enabled={activeView === 'cash-anomalies'} />;
+      case 'officer-activity':
+        return <OfficerActivityView enabled={activeView === 'officer-activity'} />;
+      case 'pilot-kpis':
+        return <PilotKpisView enabled={activeView === 'pilot-kpis'} />;
+      case 'data-sync':
+        return <DataSyncView enabled={activeView === 'data-sync'} />;
+      case 'sync-log':
+        return <SyncLogView enabled={activeView === 'sync-log'} />;
       case 'assign-task':
         return <AssignTaskView enabled={activeView === 'assign-task'} />;
       case 'announcements':
@@ -5800,9 +6241,10 @@ export default function DashboardPage() {
                 </button>
               );
             })}
+            {!PILOT_MODE && (<>
             <div className="my-3 border-t border-white/10" />
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2 flex items-center gap-1.5">
-              <Shield className="h-3 w-3 text-green-400" /> Security & Compliance
+              <Shield className="h-3 w-3 text-green-400" /> Security &amp; Compliance · Reference
             </p>
             {SECURITY_NAV_ITEMS.map((item) => {
               const isActive = activeView === item.id;
@@ -5826,7 +6268,7 @@ export default function DashboardPage() {
               );
             })}
             <div className="my-3 border-t border-white/10" />
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">CBS Integration</p>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2">CBS Integration · Demo data</p>
             {CBS_NAV_ITEMS.map((item) => {
               const isActive = activeView === item.id;
               return (
@@ -5873,6 +6315,7 @@ export default function DashboardPage() {
                 </button>
               );
             })}
+            </>)}
           </nav>
         </ScrollArea>
 
@@ -5939,7 +6382,11 @@ export default function DashboardPage() {
         </header>
 
         {/* Content */}
-        <div className="p-4 lg:p-6">{renderView()}</div>
+        <div className="p-4 lg:p-6">
+          {REFERENCE_VIEWS.has(activeView) && <ReferenceBanner kind="reference" />}
+          {DEMO_DATA_VIEWS.has(activeView) && <ReferenceBanner kind="demo" />}
+          {renderView()}
+        </div>
       </main>
     </div>
   );

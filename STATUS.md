@@ -2,6 +2,37 @@
 
 ---
 
+## 🟢 DECISIONS — 2026-07-14
+
+- **Multi-tenant / white-label SaaS stays PARKED** (post-pilot). Confirmed today. One clean
+  env-branded deployment per institution; a 2nd institution = a 2nd deployment until the pilot
+  proves the workflow. Resume order unchanged (see CLAUDE.md rule 5). No tenant code before pilot.
+- **Face verification = attendance clock-in, NOT surveillance.** It does **not** carry the
+  surveillance-consent risk (that concern is about *location* tracking). Building automated
+  on-device face match now (enroll → embedding + threshold + liveness). See
+  `PRODUCTIVITY_TRACKING_SCOPE.md` §B2.
+- **Implemented (2026-07-14; team will test on a real arm64 device — never Expo Go/emulator).**
+  Setup/handoff: `fieldos-app/FACE_VOICE_SETUP.md`. Stack chosen: vision-camera + fast-tflite
+  (MobileFaceNet) + ML Kit liveness; homelab Whisper for STT.
+  1. **Real face verification** — enroll reference face (`app/face-enroll.tsx`), on-device
+     MobileFaceNet embedding + cosine threshold + blink/turn liveness (`FaceScanner.tsx`,
+     `faceVerifyService.ts`). Gates start-of-day clock-in on Home; result stored on the
+     `day_start_records` row (`face_verified`, `face_similarity`) + audited. Backend
+     `POST/GET /face/*` stores the enrolled template. Falls back to photo-proof when the device
+     can't run the model.
+  2. **On-device Gemma kept** (not ripped out) — already Tier-1 with server fallback; needs an
+     EAS dev-client build + model download to exercise on device. No code change needed.
+  3. **Real voice notes** — `expo-audio` recording → `/voice-ai/transcribe` → homelab Whisper,
+     then the existing cleanup/summary tiers (`voice-notes.tsx`, `voiceNoteService.transcribeAudio`,
+     backend Whisper proxy). Types as fallback when Whisper is down.
+- **On-device Gemma & face-match are offline-first Tier 1; the homelab LLM/STT is the online Tier 2.**
+  Matches the existing tiered fallback in `voiceNoteService.ts` (Tier 1 on-device → Tier 2 backend).
+- **DEVICE-TUNE on first real-device run:** `EXPO_PUBLIC_FACE_THRESHOLD` (default 0.62), the
+  MobileFaceNet input normalization + embedding length, and the liveness yaw/blink angles in
+  `FaceScanner.tsx`. These can't be verified in this environment (native, real-device only).
+
+---
+
 ## ⬆️ UPDATE — 2026-07-10 (pilot-hardening sprint, same day)
 
 The audit below is the "before" picture. Here is what changed after it, all **verified by
@@ -62,7 +93,65 @@ awaiting disbursement.
   without going back through Tasks.
 - **Dashboard header date** now uses Asia/Kathmandu, matching the backend's "today".
 
+**Full sync-events log (verified):**
+- `GET /manager/sync-events` returns the full sync-queue log (status counts + every event with
+  entity, operation, retry count, error, timing). Dashboard **Sync Log** view: completed/pending/
+  failed counts + a per-event table. Closes the "sync only showed numbers" gap. Verified rendering.
+
+**Responsiveness pass (verified):**
+- Dashboard tables now scroll horizontally on narrow screens instead of clipping. The shared
+  `DashboardTable` (Staff Activity, Visits, PAR, PTP, Audit, EOD) was already wrapped; fixed the
+  two custom tables I'd added (Cash Reconciliation, Officer Activity) — verified at 375px mobile.
+- Mobile app nav already handles the Android gesture-bar/notch safe area (`insets.bottom` on the
+  tab bar, `insets.top` on AppHeader).
+
+**CBS data bridge (verified):**
+- **Read-first CBS integration** — `POST /data/import-clients` upserts the institution's
+  client/loan-balance list from a CSV they export from their core banking (match by `member_id`;
+  existing updated, new created, manager-only), and `GET /data/postings` returns the day's
+  collections as a CSV the finance team imports back into the CBS. **FieldOS never writes to the
+  CBS directly** (avoids double-posting). Dashboard **CBS Data Sync** view (upload + download),
+  template at `cbs-import-template.csv`. 3 tests added (19 total). Adjust column mapping in
+  `data_bridge.py` when you get the institution's real export format.
+
+**Pilot polish (verified):**
+- **Pilot mode hides off-plan pages** — the Security/Reference, CBS/Demo, and Pilot/Demo nav
+  sections are hidden by default so the institution only sees real operational features. Verified:
+  Threat Model + CBS items gone from the nav. Set `NEXT_PUBLIC_PILOT_MODE=false` to show everything.
+- **Pilot Metrics** — `GET /manager/pilot-metrics` + dashboard **Pilot Metrics** view: adoption
+  (active officers, day-starts), throughput (collected today/all-time), anti-fraud proof (receipts
+  sent, anomalies), reliability (pending sync). This is the weekly pilot-success + sales-data
+  rollup. Verified rendering.
+
+**Per-user activity + wiring (verified):**
+- **Officer Activity view** — `GET /manager/officer-activity?officer_id=X` returns one officer's
+  full, chronological timeline (day-starts, visits with location, collections with amount+location,
+  audited actions). Dashboard view has an officer dropdown → their complete trail. Verified:
+  Ram Bahadur Shah, 15 events. (`/manager/staff` now also returns numeric `id`.)
+
+**Pre-pilot readiness bundle (verified):**
+- **Automated tests on the money paths** — `pytest` suite, **16 tests passing**: auth 401s,
+  officer-id-from-token (forged body ignored), server-side balance, SMS receipt fired, Nepal-time
+  timestamps, loan-approval RBAC, day-start office-IP gate, cash reconciliation split, and the
+  three anomaly rules. Isolated test DB. Was zero tests before.
+- **Error monitoring** — Sentry wired in the backend, gated on `SENTRY_DSN` (no-op until set).
+- **Git-history secret scrub** — documented as a manual force-push in GO_LIVE.md (not auto-run,
+  since it rewrites shared history).
+- **Cash reconciliation + anomaly detection** — `GET /manager/cash-reconciliation` (cash vs
+  digital per officer, so the manager reconciles physical cash) and `GET /manager/anomalies`
+  (rule-based flags: collection-without-visit, collection-without-GPS, EOD-vs-actual mismatch).
+  Surfaced in the dashboard's new **Cash & Anomalies** view. Verified end-to-end + unit-tested.
+- **Decorative pages labelled** — the Security/Pilot nav sections now read "· Reference" /
+  "(Demo Data)", CBS reads "· Demo data", and each of those views shows a banner clarifying it's
+  reference/demo content, not live data. No more polished-but-fake screens misleading a reviewer.
+
 **Post-pilot growth sprint (verified):**
+- **Event-based staff map + last-seen done** — the dashboard's new **Staff Map** plots each
+  officer's most recent GPS position (from the points already captured at visits/collections)
+  on an OpenStreetMap of Kathmandu, with a dashed trail and a "last seen at [place] at [time]"
+  popup. Verified in-browser: Ram at Kalanki, Hari at Balaju, both with labelled markers + trails.
+  Event-based only (official actions), never continuous tracking — matches survey acceptance.
+  Backend: `GET /manager/staff-locations`. Frontend: `StaffMap.tsx` (react-leaflet, client-only).
 - **Office-WiFi day-start gate + selfie done** — an officer can only start their day from the
   branch network: the backend checks the request's source IP against the branch's registered
   `office_ip` and returns **403** when off-network (verified: 127.0.0.1 → verified start;

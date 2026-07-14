@@ -16,6 +16,9 @@ import { fetchAnnouncements } from '../../services/announcementService';
 import type { PriorityClient, AISuggestion } from '../../services/aiService';
 import { fetchAssignedTasks } from '../../services/taskService';
 import { startDayWithVerification, captureSelfie } from '../../services/dayStartService';
+import type { FaceResult } from '../../services/dayStartService';
+import { FaceScanner } from '../../components/fieldos/FaceScanner';
+import { isEnrolled, verifyEmbedding } from '../../services/faceVerifyService';
 import { getActivePromises } from '../../db/repositories/promiseToPayRepo';
 import { getTotalCollectedToday } from '../../db/repositories/collectionsRepo';
 import { query } from '../../db/database';
@@ -26,7 +29,6 @@ export default function DashboardScreen() {
     dayStarted,
     dayVerifiedAt,
     setSelectedClient,
-    openFaceVerification,
     syncStatus,
     syncItemsReady,
     syncFailedCount,
@@ -36,15 +38,15 @@ export default function DashboardScreen() {
   const { t } = useTranslation();
   const totalUnsynced = syncItemsReady + syncFailedCount;
   const [startingDay, setStartingDay] = useState(false);
+  const [showFaceScan, setShowFaceScan] = useState(false);
 
-  // Real start-of-day: take a selfie, then the server checks the officer is on the branch
-  // office network (403 if not). Only then does the local day begin.
-  const handleStartDay = useCallback(async () => {
-    if (startingDay) return;
-    setStartingDay(true);
+  // Finish start-of-day: capture a selfie for the manager (only when face-match
+  // didn't run), then the server checks the officer is on the branch office
+  // network (403 if not). Only then does the local day begin.
+  const finishDayStart = useCallback(async (face: FaceResult | null) => {
     try {
-      const selfie = await captureSelfie();            // front-camera photo (or null if skipped)
-      const result = await startDayWithVerification(selfie);
+      const selfie = face ? null : await captureSelfie(); // face scan is the proof when present
+      const result = await startDayWithVerification(selfie, face);
       if (result.blocked) {
         Alert.alert(t('dayStartBlockedTitle'), result.message || t('dayStartBlockedMsg'));
         return;
@@ -58,7 +60,47 @@ export default function DashboardScreen() {
     } finally {
       setStartingDay(false);
     }
-  }, [startingDay, startDay, t]);
+  }, [startDay, t]);
+
+  // Real start-of-day: face clock-in first (if enrolled + device can run it),
+  // otherwise fall back to plain photo-proof.
+  const handleStartDay = useCallback(async () => {
+    if (startingDay) return;
+    setStartingDay(true);
+    const enrolled = await isEnrolled();
+    if (enrolled) {
+      setShowFaceScan(true); // the FaceScanner overlay drives the rest
+    } else {
+      // Not enrolled yet — offer to set it up; either way don't block the day.
+      Alert.alert(t('faceNotEnrolledTitle'), t('faceNotEnrolledMsg'), [
+        { text: t('faceEnrollLater'), style: 'cancel', onPress: () => finishDayStart(null) },
+        { text: t('faceEnrollNow'), onPress: () => { setStartingDay(false); router.push('/face-enroll'); } },
+      ]);
+    }
+  }, [startingDay, finishDayStart, t, router]);
+
+  // FaceScanner callbacks.
+  const handleFaceEmbedding = useCallback(async (embedding: number[]) => {
+    setShowFaceScan(false);
+    const face = await verifyEmbedding(embedding);
+    if (!face.verified) {
+      Alert.alert(t('faceNoMatchTitle'), t('faceNoMatchMsg'));
+      setStartingDay(false);
+      return;
+    }
+    await finishDayStart(face);
+  }, [finishDayStart, t]);
+
+  const handleFaceUnavailable = useCallback(() => {
+    setShowFaceScan(false);
+    // Device can't run the model → fall back to photo-proof silently.
+    finishDayStart(null);
+  }, [finishDayStart]);
+
+  const handleFaceCancel = useCallback(() => {
+    setShowFaceScan(false);
+    setStartingDay(false);
+  }, []);
 
   // AI state
   const [priorityQueue, setPriorityQueue] = useState<PriorityClient[]>([]);
@@ -161,6 +203,18 @@ export default function DashboardScreen() {
   const initials = (name: string) => {
     return (name || '??').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   };
+
+  // Full-screen face clock-in takeover while scanning.
+  if (showFaceScan) {
+    return (
+      <FaceScanner
+        mode="verify"
+        onEmbedding={handleFaceEmbedding}
+        onUnavailable={handleFaceUnavailable}
+        onCancel={handleFaceCancel}
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>

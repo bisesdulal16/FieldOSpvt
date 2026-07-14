@@ -49,6 +49,29 @@ class Settings:
     SMS_SENDER: str = os.getenv("SMS_SENDER", "FieldOS")  # Sparrow "from" identity
     SMS_SPARROW_URL: str = os.getenv("SMS_SPARROW_URL", "http://api.sparrowsms.com/v2/sms/")
 
+    # ── Error monitoring (Sentry) ─────────────────────────────────────────
+    # Set SENTRY_DSN in production to capture exceptions. Unset = disabled (no-op).
+    SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
+
+    # ── AI summaries (server-side LLM — works on every phone) ─────────────
+    # LLM_PROVIDER=heuristic (default, no LLM) | ollama (homelab) | openai
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "heuristic").lower()
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "llama3.2")
+    OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+    # ── Voice notes: speech-to-text ───────────────────────────────────────
+    # STT_PROVIDER=off (default) | whisper_api (OpenAI Whisper) | ollama
+    STT_PROVIDER: str = os.getenv("STT_PROVIDER", "off").lower()
+    STT_MODEL: str = os.getenv("STT_MODEL", "whisper-1")
+
+    # ── Face verification for attendance (server-side match) ──────────────
+    # FACE_PROVIDER=off (default, photo-proof only) | deepface (homelab, real match)
+    FACE_PROVIDER: str = os.getenv("FACE_PROVIDER", "off").lower()
+    FACE_MATCH_THRESHOLD: float = float(os.getenv("FACE_MATCH_THRESHOLD", "0.55"))
+    DEEPFACE_MODEL: str = os.getenv("DEEPFACE_MODEL", "Facenet")
+
     @property
     def branding(self) -> dict:
         return {

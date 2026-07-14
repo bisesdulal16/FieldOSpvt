@@ -8,6 +8,16 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import engine, Base
+
+# Error monitoring — only active when SENTRY_DSN is set (no-op otherwise).
+if settings.SENTRY_DSN:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.APP_ENV,
+        traces_sample_rate=0.1,
+        send_default_pii=False,
+    )
 from app.middleware.rate_limiter import RateLimitMiddleware
 from app.middleware.audit_middleware import AuditMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
@@ -21,6 +31,8 @@ from app.routers import (
     loans,
     branding,
     day_start,
+    face,
+    data_bridge,
     collections,
     visit,
     promise,
@@ -108,6 +120,8 @@ app.include_router(clients.router, prefix=settings.API_V1_PREFIX, tags=["Clients
 app.include_router(loans.router, prefix=settings.API_V1_PREFIX, tags=["Loans"])
 app.include_router(branding.router, prefix=settings.API_V1_PREFIX, tags=["Branding"])
 app.include_router(day_start.router, prefix=settings.API_V1_PREFIX, tags=["Day Start"])
+app.include_router(face.router, prefix=settings.API_V1_PREFIX, tags=["Face Verification"])
+app.include_router(data_bridge.router, prefix=settings.API_V1_PREFIX, tags=["Data Import/Export"])
 app.include_router(collections.router, prefix=settings.API_V1_PREFIX, tags=["Collections"])
 app.include_router(visit.router, prefix=settings.API_V1_PREFIX, tags=["Visit Check-ins"])
 app.include_router(promise.router, prefix=settings.API_V1_PREFIX, tags=["Promise to Pay"])

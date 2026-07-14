@@ -43,13 +43,25 @@ Today the face check is a mock modal. Two real levels:
 - At start-day and high-value collections, **capture a selfie with `expo-camera`** and store it with the action.
 - The manager sees the photo against the action in the dashboard. No automated matching — but it's real accountability ("show me who recorded this"), cheap, and reliable on all phones.
 
-**B2 — Automated face match (phase 2, ~2–3 weeks)**
+**B2 — Automated face match (BUILDING — decision 2026-07-14)**
 - **Enroll** a reference face per officer at onboarding (selfie → face embedding).
-- At verification, capture a selfie → compute embedding on-device → cosine-similarity vs the enrolled embedding → pass/fail at a threshold.
-- Tech: `expo-camera` + an on-device face-embedding model (MobileFaceNet via `react-native-fast-tflite` or ExecuTorch). We already have the dev-build pipeline for native models (same path as Gemma).
-- Caveats: needs decent cameras/lighting; **liveness/anti-spoof** (defeating a photo-of-a-photo) is a further, harder step; consent + storage of biometric templates raises privacy/legal duties.
+- At verification (clock-in / start-of-day), capture a selfie → compute embedding on-device →
+  cosine-similarity vs the enrolled embedding → pass/fail at a threshold.
+- **Liveness** (blink / head-turn) to stop photo-of-a-photo spoofing.
+- Tech: `expo-camera` + an on-device face-embedding model (MobileFaceNet via `react-native-fast-tflite`
+  or ExecuTorch). We already have the dev-build pipeline for native models (same path as Gemma).
+- Needs decent cameras/lighting; runs only in a native dev/standalone build on a capable arm64
+  phone (never Expo Go / emulator).
 
-**Recommendation:** ship **B1 (photo proof)** for the pilot; do **B2** only if the pilot shows officers gaming identity. Automated biometrics is real work + a privacy/compliance commitment.
+**Consent framing — CORRECTED (2026-07-14):** this is **attendance clock-in**, the same face/photo
+check countless organizations use to punch in. It is **not** field/GPS surveillance and does **not**
+carry the "surveillance-consent" risk flagged for continuous location tracking. Officers still get a
+plain onboarding notice that a face reference is stored for clock-in, but this is standard attendance
+tooling, not covert monitoring. (The surveillance-consent caution below applies to **location**
+capture, not to attendance face-match.)
+
+**Decision:** build B2 now (enroll → on-device embedding + threshold + liveness). Tested on a real
+device by the team. B1 photo-proof remains the fallback on phones that can't run the model.
 
 ---
 
@@ -74,10 +86,14 @@ Rule-based first (matches the roadmap; explainable; no ML risk). Runs server-sid
 ---
 
 ## Privacy & adoption (important)
-- Officers must **consent** and see plainly what's captured (visit points, last-seen, selfies) — frame it as **visit verification**, not surveillance. The roadmap explicitly flags "GPS surveillance fear" as an adoption red flag.
+- The **surveillance-consent** concern is about **location** capture: officers must see plainly what
+  location is captured (visit points, last-seen) — frame it as **visit verification**, not surveillance.
+  The roadmap explicitly flags "GPS surveillance fear" as an adoption red flag.
 - Keep to **visit-point + last-seen** (your choice) — not full-day tracking.
 - Define **retention** (e.g., purge raw locations after N days; keep aggregates) and who can see what (RBAC).
-- Biometric templates (B2) carry legal/consent obligations — get sign-off before enabling.
+- **Face match (B2) is attendance clock-in, not surveillance** (decision 2026-07-14): treat it like any
+  punch-in face check. Show a one-line onboarding notice that a face reference is stored for clock-in;
+  no separate surveillance-consent regime is required for the pilot.
 
 ---
 

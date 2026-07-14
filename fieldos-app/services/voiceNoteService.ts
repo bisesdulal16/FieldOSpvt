@@ -10,6 +10,7 @@
  * 6. Sync to server via sync queue
  */
 
+import { File } from 'expo-file-system';
 import { getConfig, getAccessToken } from './apiClient';
 import {
   createVoiceNote,
@@ -111,6 +112,39 @@ export async function createNote(params: {
     return { success: true, noteId };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Failed to create note' };
+  }
+}
+
+/**
+ * Transcribe a recorded audio file to text (real voice notes).
+ *
+ * Reads the expo-audio recording as base64 and posts it to the backend, which
+ * proxies to the homelab Whisper server. If Whisper is down/unset the backend
+ * returns empty text — the officer then just types the note (never blocks).
+ */
+export async function transcribeAudio(
+  fileUri: string,
+  language: string = 'ne',
+): Promise<{ success: boolean; text?: string; engine?: string; error?: string }> {
+  try {
+    const b64 = await new File(fileUri).base64();
+    const { baseUrl } = getConfig();
+    const token = getAccessToken();
+    const res = await fetch(`${baseUrl}/voice-ai/transcribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ audio_base64: b64, language }),
+    });
+    const json = await res.json();
+    if (json?.success) {
+      return { success: true, text: json.data?.text || '', engine: json.data?.engine };
+    }
+    return { success: false, error: json?.detail || 'Transcription failed' };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Could not read audio' };
   }
 }
 

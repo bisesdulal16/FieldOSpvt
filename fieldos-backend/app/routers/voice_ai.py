@@ -15,6 +15,7 @@ Human Review: All output requires officer review before saving.
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ import re
 import time
 import urllib.request
 import urllib.error
+import uuid
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Any
@@ -82,6 +84,62 @@ def prewarm_ollama() -> None:
         logger.info(f"Ollama model '{OLLAMA_MODEL}' pre-warmed")
     except Exception:
         pass
+
+
+# ─── Speech-to-text (homelab Whisper) with placeholder fallback ──
+# Self-hosted Whisper on the homelab — anything exposing an OpenAI-compatible
+# POST /v1/audio/transcriptions that accepts a multipart `file`
+# (faster-whisper-server / speaches / whisper-asr-webservice). If WHISPER_URL is
+# unset or unreachable, /transcribe returns a clearly-labelled placeholder so the
+# pilot never hard-fails when the STT box is down.
+WHISPER_URL = os.getenv("WHISPER_URL", "")  # e.g. http://192.168.1.50:9000/v1/audio/transcriptions
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "Systran/faster-whisper-small")
+WHISPER_TIMEOUT = float(os.getenv("WHISPER_TIMEOUT", "60"))
+
+
+def _whisper_transcribe(audio_bytes: bytes, filename: str, language: str | None) -> str | None:
+    """POST audio to a self-hosted Whisper server as multipart/form-data.
+    Returns transcript text, or None on any failure (caller falls back)."""
+    if not WHISPER_URL:
+        return None
+    boundary = f"----fieldos{uuid.uuid4().hex}"
+    fields = {"model": WHISPER_MODEL, "response_format": "json"}
+    if language and language not in ("auto", ""):
+        fields["language"] = language[:2]
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        )
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
+    )
+    parts.append(audio_bytes)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    payload = b"".join(parts)
+    try:
+        req = urllib.request.Request(
+            WHISPER_URL,
+            data=payload,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=WHISPER_TIMEOUT) as r:
+            raw = r.read().decode()
+        try:
+            text = (json.loads(raw).get("text") or "").strip()
+        except ValueError:
+            text = raw.strip()  # some servers return text/plain
+        return text or None
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+        logger.warning(f"Whisper unavailable, using placeholder: {e}")
+        return None
+
+
+async def _stt(audio_bytes: bytes, filename: str, language: str | None) -> str | None:
+    """Async wrapper so the blocking STT HTTP call doesn't stall the event loop."""
+    return await asyncio.to_thread(_whisper_transcribe, audio_bytes, filename, language)
 
 
 # ─── Request/Response Models ─────────────────────────────────────
@@ -182,28 +240,48 @@ def _generate_answer(question: str, context: dict | None, history: list[dict] | 
 @router.post("/transcribe")
 async def transcribe_audio(request: TranscribeRequest):
     """
-    Audio transcription endpoint.
-    Pilot phase: Returns placeholder text (audio processed locally on device).
-    For production, integrate with a local ASR engine.
-    """
-    # Determine language
-    lang = request.language or "auto"
-    is_nepali = "ne" in lang or "auto" == lang
+    Speech-to-text for a recorded voice note.
 
-    sample_text = (
-        "आज म सunitा भेटेर आउँछु। उनको कर्जा तिर्ने कुरा गर्छु।"
-        if is_nepali else
-        "I am visiting Sunita today to discuss her loan repayment."
-    )
+    The mobile app records audio (expo-audio), base64-encodes it, and posts it
+    here. We decode it and hand it to the homelab Whisper server (WHISPER_URL).
+    If Whisper is unset/unreachable, we return a labelled placeholder so the
+    officer can still type — the pilot never hard-fails on a down STT box.
+
+    Privacy: audio is streamed to the STT server and NOT persisted here.
+    """
+    started = time.time()
+    lang = request.language or "auto"
+
+    # Accept either a raw base64 string or a data URI ("data:audio/m4a;base64,...").
+    b64 = request.audio_base64 or ""
+    ext = "m4a"
+    if b64.startswith("data:"):
+        header, _, b64 = b64.partition(",")
+        m = re.search(r"audio/([a-zA-Z0-9]+)", header)
+        if m:
+            ext = {"mp4": "m4a", "x-m4a": "m4a", "mpeg": "mp3"}.get(m.group(1), m.group(1))
+    try:
+        audio_bytes = base64.b64decode(b64, validate=False)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid base64 audio payload")
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio payload")
+
+    text = await _stt(audio_bytes, f"note.{ext}", lang)
+    engine = "whisper" if text else "unavailable"
+    if not text:
+        # Placeholder: keep the flow alive; the officer types/edits the note.
+        text = ""
 
     return {
         "success": True,
         "data": {
-            "text": sample_text,
-            "word_count": len(sample_text.split()),
+            "text": text,
+            "engine": engine,
+            "word_count": len(text.split()),
             "language_detected": lang,
-            "processing_time_ms": 0,
-            "confidence": "high",
+            "processing_time_ms": int((time.time() - started) * 1000),
+            "confidence": "high" if engine == "whisper" else "none",
         },
         "timestamp": _ts(),
         "disclaimer": "Transcription is AI-generated. Officer must review before saving.",

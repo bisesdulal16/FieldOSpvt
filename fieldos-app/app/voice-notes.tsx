@@ -5,6 +5,9 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  useAudioRecorder, useAudioRecorderState, RecordingPresets, AudioModule, setAudioModeAsync,
+} from 'expo-audio';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
 import { AppHeader } from '../components/fieldos/AppHeader';
 import { PrimaryButton } from '../components/fieldos/PrimaryButton';
@@ -18,6 +21,7 @@ import {
   requestAISummary,
   approveNote,
   removeNote,
+  transcribeAudio,
 } from '../services/voiceNoteService';
 import { useFieldOSStore } from '../store/useFieldOSStore';
 import type { VoiceNote } from '../services/voiceNoteService';
@@ -38,6 +42,46 @@ export default function VoiceNotesScreen() {
   // Create mode state
   const [noteText, setNoteText] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
+
+  // Voice recording (expo-audio) → Whisper transcription
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder);
+  const [transcribing, setTranscribing] = useState(false);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(t('voiceRecordPermTitle'), t('voiceRecordPermMsg'));
+        return;
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+    } catch (e) {
+      Alert.alert(t('error'), t('voiceRecordError'));
+    }
+  }, [audioRecorder, t]);
+
+  const stopRecording = useCallback(async () => {
+    try {
+      await audioRecorder.stop();
+      const uri = audioRecorder.uri;
+      if (!uri) return;
+      setTranscribing(true);
+      const result = await transcribeAudio(uri, 'ne');
+      if (result.success && result.text) {
+        setNoteText(prev => (prev.trim() ? `${prev.trim()} ${result.text}` : result.text!));
+      } else if (result.success) {
+        // Whisper down/empty — officer types instead.
+        Alert.alert(t('voiceTranscribeEmptyTitle'), t('voiceTranscribeEmptyMsg'));
+      } else {
+        Alert.alert(t('error'), result.error || t('voiceRecordError'));
+      }
+    } finally {
+      setTranscribing(false);
+    }
+  }, [audioRecorder, t]);
 
   // AI processing state
   const [cleaningUp, setCleaningUp] = useState(false);
@@ -307,6 +351,40 @@ export default function VoiceNotesScreen() {
             </View>
           )}
 
+          {/* Voice recorder → Whisper transcription */}
+          <View style={styles.recorderCard}>
+            <TouchableOpacity
+              style={[styles.recordButton, recorderState.isRecording && styles.recordButtonActive]}
+              onPress={recorderState.isRecording ? stopRecording : startRecording}
+              disabled={transcribing}
+              activeOpacity={0.85}
+            >
+              {transcribing ? (
+                <ActivityIndicator size="small" color={colors.white} />
+              ) : (
+                <Ionicons
+                  name={recorderState.isRecording ? 'stop' : 'mic'}
+                  size={24}
+                  color={colors.white}
+                />
+              )}
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.recorderTitle}>
+                {transcribing
+                  ? t('voiceTranscribing')
+                  : recorderState.isRecording
+                    ? t('voiceRecording')
+                    : t('voiceRecordPrompt')}
+              </Text>
+              <Text style={styles.recorderSub}>
+                {recorderState.isRecording
+                  ? `${Math.floor((recorderState.durationMillis || 0) / 1000)}s · ${t('voiceTapToStop')}`
+                  : t('voiceRecordHint')}
+              </Text>
+            </View>
+          </View>
+
           {/* Title */}
           <Text style={styles.label}>{t('voiceNoteTitleLabel')}</Text>
           <TextInput
@@ -554,6 +632,18 @@ const styles = StyleSheet.create({
     padding: spacing.md, borderWidth: 1, borderColor: colors.gray200,
     fontSize: fontSize.base, color: colors.gray800, lineHeight: 20,
   },
+  recorderCard: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.white, borderRadius: borderRadius.lg,
+    padding: spacing.md, borderWidth: 1, borderColor: colors.gray200, marginTop: spacing.md,
+  },
+  recordButton: {
+    width: 52, height: 52, borderRadius: 26, backgroundColor: colors.navy,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  recordButtonActive: { backgroundColor: colors.red },
+  recorderTitle: { fontSize: fontSize.base, fontWeight: '600', color: colors.gray800 },
+  recorderSub: { fontSize: fontSize.sm, color: colors.gray500, marginTop: 2 },
   aiActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   aiActionChip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,

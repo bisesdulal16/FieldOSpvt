@@ -21,9 +21,14 @@
 3. **Do not fake offline sync, GPS, audit, or security.** If something is a stub, label it.
 4. **No secrets in git.** `.env` files and `*.db` must be gitignored and untracked (they are
    currently tracked — fix pending; see STATUS.md §5). Never commit a new one.
-5. **Multi-tenant / white-label SaaS is deferred to post-pilot.** Build one clean, brandable
-   tenant. Do not add tenant tables, per-org theming infra, or billing before one MFI runs the
-   workflow for real. **Branding is single-tenant + env-driven:** `GET /api/v1/branding` returns
+5. **Multi-tenant / white-label SaaS is PARKED (post-pilot).** Decision (2026): do not build the
+   tenant layer until the pilot proves the workflow. One clean env-branded deployment per
+   institution; a 2nd institution before multi-tenancy = a 2nd deployment. When resumed, do it in
+   this safe order: (1) `tenant` model + migrate existing data to a default tenant, (2) a
+   `require_tenant` dependency that scopes every query in ONE enforced place, (3) tests proving
+   Institution A can't read Institution B, (4) per-tenant branding/self-signup/subdomains,
+   (5) billing. Missing one query-scope = a cross-institution money-data leak, so isolation tests
+   come before any UI. **Branding is single-tenant + env-driven:** `GET /api/v1/branding` returns
    `ORG_NAME`/`ORG_TAGLINE`/`ORG_PRODUCT_SUFFIX`/colors/`ORG_LOGO_URL` from env; the dashboard
    (login + sidebar) and mobile login consume it. To rebrand, set the `ORG_*` env vars — no code
    change. Officer-side origination screens (`app/register-borrower.tsx`, `app/loan-application.tsx`)
@@ -59,6 +64,20 @@
   (`DB_TYPE=postgres` + `DATABASE_URL=postgresql+asyncpg://...?ssl=require`, e.g. Neon free tier).
   Store timestamps at **seconds precision** (the nepal_time helpers do this) so they fit the
   `String(30)` columns on Postgres. See DEPLOY.md for hosting (Neon + Fly.io + Vercel + EAS).
+- **Tests:** `pip install -r requirements-dev.txt` then `pytest` (from `fieldos-backend/`). Covers
+  the money/security paths — auth 401s, officer_id-from-token (forged body ignored), server-side
+  balance, SMS receipt fired, Nepal-time timestamps, loan-approval RBAC, day-start office-IP gate.
+  Tests use an isolated `/tmp/fieldos_test.db`, so they don't touch dev data. Add a test when you
+  touch a money path.
+- **Error monitoring:** set `SENTRY_DSN` in prod to capture exceptions (no-op when unset).
+- **CBS data bridge (read-first):** `POST /data/import-clients` (CSV upsert by member_id, JSON body
+  `{csv_text}`, manager-only) + `GET /data/postings` (day's collections as a CSV string). Dashboard
+  "CBS Data Sync" view. Never writes to the CBS directly. `app/routers/data_bridge.py` — change the
+  column reads there when you get the institution's real export. Note: the older `/cbs/*` router is
+  the MOCK/demo one (hidden in pilot mode); this `/data/*` bridge is the real integration.
+- **Staff map (event-based):** `GET /manager/staff-locations` returns each officer's latest GPS
+  point + trail, aggregated from visit/collection GPS. Dashboard `StaffMap.tsx` (react-leaflet,
+  loaded via `next/dynamic` `ssr:false` because Leaflet needs `window`). Never continuous tracking.
 - **Office-network day-start gate:** `POST /day-start` checks the request source IP (X-Forwarded-For
   aware) against `Branch.office_ip` (comma-separated; empty = disabled) → 403 when off-network, so
   officers can only start their day at the branch. Captures a front-camera selfie + GPS; manager
