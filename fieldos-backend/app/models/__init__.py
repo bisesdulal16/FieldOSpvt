@@ -21,6 +21,8 @@ from app.models.cbs import (
     CBSPostingLog,
 )
 from app.models.announcement import Announcement
+from app.models.sms_notification import SmsNotification
+from app.models.day_start import DayStartRecord
 
 __all__ = [
     "Base",
@@ -44,5 +46,7 @@ __all__ = [
     "CBSScheduleItem",
     "CollectionEvent",
     "CBSPostingLog",
+    "SmsNotification",
+    "DayStartRecord",
     "Announcement",
 ]
