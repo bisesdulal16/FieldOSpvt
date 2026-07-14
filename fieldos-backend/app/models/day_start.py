@@ -28,3 +28,8 @@ class DayStartRecord(Base):
     gps_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     gps_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     gps_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Face clock-in result, computed on-device (MobileFaceNet embedding vs the officer's
+    # enrolled template, plus a blink/turn liveness check). face_verified=None means the
+    # device couldn't run the model (fell back to plain photo-proof).
+    face_verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    face_similarity: Mapped[float | None] = mapped_column(Float, nullable=True)

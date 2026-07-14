@@ -50,6 +50,20 @@
           "locationPermission": "FieldOS needs location access for visit check-ins."
         }
       ],
+      [
+        "react-native-vision-camera",
+        {
+          "enableFrameProcessors": true,
+          "cameraPermissionText": "FieldOS needs the camera for face clock-in.",
+          "enableMicrophonePermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "FieldOS needs the microphone to record voice notes."
+        }
+      ],
       "expo-llm-mediapipe",
       [
         "expo-build-properties",

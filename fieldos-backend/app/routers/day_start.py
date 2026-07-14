@@ -32,6 +32,9 @@ class DayStartRequest(BaseModel):
     gps_latitude: float | None = None
     gps_longitude: float | None = None
     gps_address: str | None = None
+    # On-device face clock-in result (None when the device fell back to photo-proof).
+    face_verified: bool | None = None
+    face_similarity: float | None = None
 
 
 def _client_ip(request: Request) -> str | None:
@@ -87,13 +90,17 @@ async def start_day(
         gps_latitude=body.gps_latitude,
         gps_longitude=body.gps_longitude,
         gps_address=body.gps_address,
+        face_verified=body.face_verified,
+        face_similarity=body.face_similarity,
     )
     db.add(record)
     await write_audit(
         db, current_user, "day_started",
         entity_type="day_start", entity_id=today_nepal_str(),
         meta={"source_ip": source_ip, "ip_verified": ip_verified,
-              "selfie": bool(body.selfie_data_uri)},
+              "selfie": bool(body.selfie_data_uri),
+              "face_verified": body.face_verified,
+              "face_similarity": body.face_similarity},
     )
     await db.commit()
 
@@ -103,6 +110,7 @@ async def start_day(
             "day_started": True,
             "ip_verified": ip_verified,
             "gate_enabled": gate_enabled,
+            "face_verified": body.face_verified,
             "started_at": record.started_at,
         },
         timestamp=int(time.time()),

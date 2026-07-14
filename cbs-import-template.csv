@@ -1,0 +1,3 @@
+member_id,name,phone_number,center_id,center_name,ward,outstanding_balance,due_amount,next_installment_date,overdue_days
+M-201,Bishnu Maya Rai,+977-9800000201,CTR-001,Kalanki Center,12,45000,2500,2026-07-20,0
+M-202,Kanchi Tamang,+977-9800000202,CTR-002,Swoyambhu Center,15,32000,1800,2026-07-20,6

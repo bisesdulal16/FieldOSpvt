@@ -1,0 +1,116 @@
+# FieldOS Nepal — full-stack container deployment for a homelab VM.
+#
+# Runs the whole app in isolated containers so you can hand a friend access to
+# THIS stack (one VM / a few ports) without exposing the rest of your homelab.
+#
+#   cp .env.example .env      # then edit the secrets
+#   docker compose up -d --build
+#   docker compose run --rm backend python seed_demo.py   # one-time demo data
+#
+# Optional on-prem AI (self-hosted STT + LLM) — off by default, enable with:
+#   docker compose --profile ai up -d --build
+#
+# Services & ports (host):
+#   backend    :8000   FastAPI (mobile app + dashboard talk to this)
+#   dashboard  :3000   Next.js manager dashboard
+#   postgres   :5432   (bind to localhost only in prod — see notes)
+#   whisper    :9000   faster-whisper (profile: ai)
+#   ollama     :11434  Ollama LLM       (profile: ai)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fieldos-postgres
+    environment:
+      POSTGRES_USER: fieldos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fieldos}
+      POSTGRES_DB: fieldos_nepal
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Keep the DB off the network — only the backend container needs it.
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fieldos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./fieldos-backend
+    container_name: fieldos-backend
+    # create_all runs on startup, so a fresh DB is ready with no migration step.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DB_TYPE: postgres
+      DATABASE_URL: postgresql+asyncpg://fieldos:${POSTGRES_PASSWORD:-fieldos}@postgres:5432/fieldos_nepal
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # White-label branding
+      ORG_NAME: ${ORG_NAME:-FieldOS}
+      ORG_TAGLINE: ${ORG_TAGLINE:-Nepal}
+      ORG_PRODUCT_SUFFIX: ${ORG_PRODUCT_SUFFIX:-Branch Manager Dashboard}
+      ORG_PRIMARY_COLOR: ${ORG_PRIMARY_COLOR:-#0B1B3A}
+      ORG_ACCENT_COLOR: ${ORG_ACCENT_COLOR:-#F59E0B}
+      ORG_LOGO_URL: ${ORG_LOGO_URL:-}
+      # SMS anti-fraud receipts: 'log' (no gateway) or 'sparrow' (Nepal prod)
+      SMS_PROVIDER: ${SMS_PROVIDER:-log}
+      SMS_API_TOKEN: ${SMS_API_TOKEN:-}
+      # On-prem AI (used when the 'ai' profile is up; graceful heuristic/typed fallback otherwise)
+      WHISPER_URL: ${WHISPER_URL:-http://whisper:8000/v1/audio/transcriptions}
+      WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma2:2b}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard:
+    build: ./fieldos-dashboard
+    container_name: fieldos-dashboard
+    environment:
+      # Server-side proxy target (dashboard → backend, inside the compose network).
+      BACKEND_URL: http://backend:8000
+      NEXT_PUBLIC_PILOT_MODE: ${NEXT_PUBLIC_PILOT_MODE:-true}
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── Optional self-hosted AI (profile: ai) ────────────────────────
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: fieldos-whisper
+    profiles: ["ai"]
+    environment:
+      WHISPER__MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
+    ports:
+      - "9000:8000"
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: fieldos-ollama
+    profiles: ["ai"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  whisper_cache:
+  ollama_data:

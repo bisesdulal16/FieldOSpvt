@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, ForeignKey
+from sqlalchemy import String, Boolean, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import DateTime
 from enum import Enum as PyEnum
@@ -28,6 +28,12 @@ class User(Base):
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Face-verification enrollment (attendance clock-in — decision 2026-07-14).
+    # Reference face embedding stored as a JSON array of floats, computed on-device
+    # (MobileFaceNet). Used as a backup so a re-installed app can re-fetch the template;
+    # verification itself happens on-device against the locally cached copy.
+    face_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    face_enrolled_at: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     branch = relationship("Branch", back_populates="users")
     devices = relationship("Device", back_populates="user")

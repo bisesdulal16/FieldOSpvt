@@ -20,6 +20,12 @@ export interface DayStartResult {
   message?: string;
 }
 
+/** On-device face clock-in result (null when the device fell back to photo-proof). */
+export interface FaceResult {
+  verified: boolean;
+  similarity: number;
+}
+
 /** Capture a start-of-day selfie (front camera). Returns a base64 data URI, or null if cancelled. */
 export async function captureSelfie(): Promise<string | null> {
   const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -52,7 +58,10 @@ async function captureGps(): Promise<{ lat?: number; lng?: number; address?: str
 }
 
 /** Capture selfie + GPS, then call the server day-start gate. */
-export async function startDayWithVerification(selfieDataUri: string | null): Promise<DayStartResult> {
+export async function startDayWithVerification(
+  selfieDataUri: string | null,
+  face: FaceResult | null = null,
+): Promise<DayStartResult> {
   const gps = await captureGps();
   const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
   const token = getAccessToken();
@@ -68,6 +77,8 @@ export async function startDayWithVerification(selfieDataUri: string | null): Pr
         gps_latitude: gps.lat,
         gps_longitude: gps.lng,
         gps_address: gps.address,
+        face_verified: face ? face.verified : null,
+        face_similarity: face ? face.similarity : null,
       }),
     });
     if (res.status === 403) {
