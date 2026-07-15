@@ -72,8 +72,9 @@
             "deploymentTarget": "16.0"
           },
           "android": {
-            "minSdkVersion": 24,
-            "usesCleartextTraffic": true
+            "minSdkVersion": 26,
+            "usesCleartextTraffic": true,
+            "buildArchs": ["arm64-v8a"]
           }
         }
       ]
