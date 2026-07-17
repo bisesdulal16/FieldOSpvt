@@ -75,9 +75,12 @@ async def seed():
     async with AsyncSessionLocal() as s:
         branch = Branch(branch_id="BR-KTM-001", name="Kathmandu Main Branch",
                         name_ne="काठमाडौं मुख्य शाखा", address="Putalisadak, Kathmandu",
-                        # Demo office network. In production the manager registers the branch's
-                        # real public IP; "127.0.0.1" lets local/emulator day-starts verify.
-                        office_ip="127.0.0.1")
+                        # Office-network day-start gate: OFF by default ("" = disabled).
+                        # It compares the request's source IP against this value, so any
+                        # non-empty default (127.0.0.1 included) makes every real phone fail
+                        # with 403 "You can only start your day from the branch office network".
+                        # To enable, set this to the branch's real PUBLIC IP.
+                        office_ip="")
         s.add(branch)
         await s.flush()
 

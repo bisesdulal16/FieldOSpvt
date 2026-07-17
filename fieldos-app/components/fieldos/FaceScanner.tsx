@@ -45,16 +45,26 @@ const NATIVE_OK = !!(VisionCamera && FaceDetector && ResizePlugin && FastTflite 
 
 export type FaceScannerMode = 'enroll' | 'verify';
 
+/**
+ * Why face clock-in couldn't run:
+ *   'native' — a native module (vision-camera / face detector / tflite) didn't load,
+ *              i.e. Expo Go or a build missing those modules. Needs a proper build.
+ *   'model'  — the natives are fine but the MobileFaceNet file failed to download or
+ *              parse. Check EXPO_PUBLIC_FACE_MODEL_URL is reachable from the phone.
+ * Reported so the pilot can tell these apart instead of guessing at "unavailable".
+ */
+export type FaceUnavailableReason = 'native' | 'model';
+
 export interface FaceScannerProps {
   mode: FaceScannerMode;
   onEmbedding: (embedding: number[]) => void;
-  onUnavailable: () => void;
+  onUnavailable: (reason?: FaceUnavailableReason) => void;
   onCancel: () => void;
 }
 
 export function FaceScanner(props: FaceScannerProps) {
   useEffect(() => {
-    if (!NATIVE_OK) props.onUnavailable();
+    if (!NATIVE_OK) props.onUnavailable('native');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   if (!NATIVE_OK) return null;
@@ -97,7 +107,7 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
 
   useEffect(() => {
     if (!hasPermission) requestPermission();
-    if (tf.state === 'error') onUnavailable();
+    if (tf.state === 'error') onUnavailable('model');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPermission, tf.state]);
 
