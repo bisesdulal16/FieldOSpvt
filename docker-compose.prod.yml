@@ -31,9 +31,13 @@ services:
       - ./deploy/nginx/templates:/etc/nginx/templates:ro
       - certbot_conf:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro
-    # Reload every 6h so renewed certs are picked up without a restart.
-    command: >
-      /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
+    # Our custom command starts with /bin/sh, which makes the nginx image SKIP its
+    # docker-entrypoint template step — so render the template ourselves first,
+    # then start the 6h cert-reload loop, then run nginx in the foreground.
+    command: >-
+      /bin/sh -c "/docker-entrypoint.d/20-envsubst-on-templates.sh;
+      while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+      nginx -g 'daemon off;'"
     restart: unless-stopped
 
   certbot:
