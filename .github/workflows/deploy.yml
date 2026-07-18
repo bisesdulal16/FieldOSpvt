@@ -45,5 +45,6 @@ jobs:
             git reset --hard origin/main
             docker compose -f docker-compose.yml -f docker-compose.prod.yml pull || true
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml restart nginx
             docker image prune -f
             docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
