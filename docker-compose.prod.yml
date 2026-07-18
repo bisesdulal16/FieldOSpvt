@@ -1,0 +1,52 @@
+# FieldOS — production overlay: nginx TLS termination + Let's Encrypt (certbot).
+#
+# Use ALONGSIDE the base compose file (it adds nginx + certbot and leaves the
+# app services untouched):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# First-time TLS bootstrap (issues the real certs) — run once:
+#
+#   ./deploy/init-letsencrypt.sh
+#
+# EC2 security group: open ONLY 22 (your IP), 80, 443 to the internet.
+# Backend :8000 and dashboard :3000 stay published on the host by the base
+# file but must NOT be open in the security group — nginx reaches them over
+# the internal compose network (service names backend / dashboard).
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: fieldos-nginx
+    depends_on:
+      - backend
+      - dashboard
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+      DASH_DOMAIN: ${DASH_DOMAIN:?set DASH_DOMAIN in .env}
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    # Reload every 6h so renewed certs are picked up without a restart.
+    command: >
+      /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot
+    container_name: fieldos-certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Attempt renewal twice a day (certbot only acts within 30 days of expiry).
+    entrypoint: >
+      /bin/sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done"
+    restart: unless-stopped
+
+volumes:
+  certbot_conf:
+  certbot_www:
