@@ -20,8 +20,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."   # repo root
 
-# Load .env so this script sees the same domains as compose.
-if [ -f .env ]; then set -a; . ./.env; set +a; fi
+# Read the vars we need from .env WITHOUT executing the file — values elsewhere
+# in .env may contain spaces (e.g. ORG_PRODUCT_SUFFIX) and sourcing would choke.
+env_get() { grep -E "^$1=" .env 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"'; }
+if [ -f .env ]; then
+  : "${API_DOMAIN:=$(env_get API_DOMAIN)}"
+  : "${DASH_DOMAIN:=$(env_get DASH_DOMAIN)}"
+  : "${LETSENCRYPT_EMAIL:=$(env_get LETSENCRYPT_EMAIL)}"
+fi
 
 : "${API_DOMAIN:?set API_DOMAIN in .env}"
 : "${DASH_DOMAIN:?set DASH_DOMAIN in .env}"
@@ -34,11 +40,8 @@ staging_arg=""
 
 compose() { docker compose -f docker-compose.yml -f docker-compose.prod.yml "$@"; }
 
-echo "### Downloading recommended TLS parameters ..."
-compose run --rm --entrypoint "\
-  sh -c 'mkdir -p /etc/letsencrypt \
-    && wget -qO /etc/letsencrypt/options-ssl-nginx.conf https://raw.githubusercontent.com/certbot/certbot/main/certbot-nginx/src/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
-    && (test -s /etc/letsencrypt/ssl-dhparams.pem || openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048)'" certbot
+# TLS hardening now lives inline in the nginx template — no external files to
+# fetch or generate here. (ECDHE-only ciphers need no dhparam.)
 
 for domain in "${domains[@]}"; do
   echo "### Creating dummy certificate for $domain ..."
