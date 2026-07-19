@@ -16,7 +16,10 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "np.fieldos.app"
+      "bundleIdentifier": "np.fieldos.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "FieldOS needs the camera for face clock-in."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -31,7 +34,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -82,9 +86,9 @@
     "scheme": "fieldos-nepal",
     "extra": {
       "eas": {
-        "projectId": "24b312d2-0f5c-4d91-bf67-e3c7a34ff221"
+        "projectId": "5d2fcdae-d167-40ae-8ab1-e6beaefeab22"
       }
     },
-    "owner": "bisesdulal16"
+    "owner": "fieldosnepal"
   }
 }

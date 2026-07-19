@@ -1,0 +1,91 @@
+# FieldOS — nginx reverse proxy with TLS termination.
+#
+# This file is a TEMPLATE: the official nginx image runs envsubst over
+# /etc/nginx/templates/*.template at startup and writes the result to
+# /etc/nginx/conf.d/. Only variables that exist in the container's
+# environment (API_DOMAIN, DASH_DOMAIN) are substituted — nginx's own
+# runtime vars like $host / $remote_addr are left untouched.
+#
+# Two public hostnames:
+#   ${API_DOMAIN}   -> backend:8000   (mobile app + dashboard proxy target)
+#   ${DASH_DOMAIN}  -> dashboard:3000 (manager dashboard)
+
+# ── HTTP :80 — ACME challenge + redirect everything else to HTTPS ──────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${API_DOMAIN} ${DASH_DOMAIN};
+
+    # Let's Encrypt webroot challenge — must stay on plain HTTP.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ── HTTPS :443 — API (FastAPI backend) ────────────────────────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${API_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${API_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${API_DOMAIN}/privkey.pem;
+    # Modern TLS (inlined — no external download needed at bootstrap).
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:le_nginx_SSL:10m;
+    ssl_session_timeout 1440m;
+    ssl_session_tickets off;
+
+    # Base64 selfies (day-start) + KYC documents ride in JSON bodies.
+    client_max_body_size 15m;
+
+    location / {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        # The day-start office-IP gate reads X-Forwarded-For — keep it accurate.
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}
+
+# ── HTTPS :443 — Manager dashboard (Next.js) ──────────────────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${DASH_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DASH_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DASH_DOMAIN}/privkey.pem;
+    # Modern TLS (inlined — no external download needed at bootstrap).
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:le_nginx_SSL:10m;
+    ssl_session_timeout 1440m;
+    ssl_session_tickets off;
+
+    client_max_body_size 15m;
+
+    location / {
+        proxy_pass http://dashboard:3000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Next.js dev/websocket + HMR upgrade (harmless in prod).
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 60s;
+    }
+}
