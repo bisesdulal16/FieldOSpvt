@@ -6,7 +6,7 @@ import { colors, fontSize, spacing, borderRadius } from '../constants';
 import { AppHeader } from '../components/fieldos/AppHeader';
 import { PrimaryButton } from '../components/fieldos/PrimaryButton';
 import { useTranslation } from '../i18n';
-import { FaceScanner } from '../components/fieldos/FaceScanner';
+import { FaceScanner, type FaceUnavailableReason } from '../components/fieldos/FaceScanner';
 import { enrollFace } from '../services/faceVerifyService';
 
 /**
@@ -36,9 +36,17 @@ export default function FaceEnrollScreen() {
     }
   };
 
-  const handleUnavailable = () => {
+  const handleUnavailable = (reason?: FaceUnavailableReason) => {
     setScanning(false);
-    Alert.alert(t('faceUnavailableTitle'), t('faceUnavailableMsg'));
+    // Append the cause: 'unavailable' alone gave the pilot no way to tell a missing
+    // native module apart from an unreachable face model.
+    const detail =
+      reason === 'model'
+        ? ' (face model could not be loaded — check the model URL is reachable)'
+        : reason === 'native'
+          ? ' (camera/face modules not available in this build)'
+          : '';
+    Alert.alert(t('faceUnavailableTitle'), t('faceUnavailableMsg') + detail);
   };
 
   if (scanning) {

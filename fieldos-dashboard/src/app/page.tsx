@@ -778,6 +778,7 @@ function StaffView({ enabled }: { enabled: boolean }) {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createdStaff, setCreatedStaff] = useState<any>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [formData, setFormData] = useState({ staff_id: '', name: '', phone_number: '', pin: '' });
 
   const staff = (Array.isArray(data) ? data : []).filter(
@@ -785,8 +786,12 @@ function StaffView({ enabled }: { enabled: boolean }) {
   ) as any[];
 
   async function handleCreate() {
-    if (!formData.staff_id || !formData.name || !formData.pin) return;
+    if (!formData.staff_id || !formData.name || !formData.pin) {
+      setCreateError('Staff ID, Name and PIN are all required.');
+      return;
+    }
     setSubmitting(true);
+    setCreateError(null);
     try {
       // Use apiMutation so the manager auth token is sent (the manager router
       // requires it); a raw fetch without the token returned 401.
@@ -797,7 +802,9 @@ function StaffView({ enabled }: { enabled: boolean }) {
       setFormData({ staff_id: '', name: '', phone_number: '', pin: '' });
       refetch();
     } catch (e: any) {
-      console.error('Create staff error:', e);
+      // Show the reason on screen. A console-only error made a failed create look
+      // identical to a dead button.
+      setCreateError(e?.message || 'Failed to create staff');
     } finally {
       setSubmitting(false);
     }
@@ -843,6 +850,11 @@ function StaffView({ enabled }: { enabled: boolean }) {
             <CardTitle className="text-sm font-semibold text-gray-700">New Field Officer</CardTitle>
           </CardHeader>
           <CardContent className="p-4 space-y-4">
+            {createError && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
+                <p className="text-sm text-red-700">{createError}</p>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-gray-600 mb-1 block">Staff ID</label>
