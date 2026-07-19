@@ -20,7 +20,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.fieldosnepal.tech",
+        "EXPO_PUBLIC_API_URL": "https://api.fieldosnepal.tech/api/v1",
         "EXPO_PUBLIC_ENABLE_MOCK_SYNC": "false",
         "EXPO_PUBLIC_FACE_MODEL_URL": "https://api.fieldosnepal.tech/static/mobilefacenet.tflite",
         "EXPO_PUBLIC_FACE_THRESHOLD": "0.62"
