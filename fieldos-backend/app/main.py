@@ -1,10 +1,12 @@
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import engine, Base
@@ -138,6 +140,14 @@ app.include_router(pilot.router, prefix=settings.API_V1_PREFIX, tags=["Pilot Man
 # Announcements: two routers — manager (POST) + mobile (GET)
 app.include_router(announcements.manager_router, prefix=settings.API_V1_PREFIX, tags=["Announcements"])
 app.include_router(announcements.mobile_router, prefix=settings.API_V1_PREFIX, tags=["Announcements"])
+
+# Static assets (ML models, etc.) — e.g. the MobileFaceNet .tflite the mobile app
+# downloads once at runtime via EXPO_PUBLIC_FACE_MODEL_URL. Served as raw bytes at
+# /static/<file>. Directory is resolved relative to the app package so it works
+# regardless of the process CWD. Drop files into fieldos-backend/static/.
+_static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+os.makedirs(_static_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 
 @app.get("/health")
