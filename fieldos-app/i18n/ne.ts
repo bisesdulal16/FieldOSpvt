@@ -44,7 +44,9 @@ const ne = {
   recordCollection: 'संकलन रेकर्ड',
   syncNow: 'अहिले सिंक',
   priorityClient: 'प्राथमिकता क्लाइन्ट',
-  overdue: 'अतिरिक्त',
+  overdue: 'बक्यौता',
+  dueToday: 'आज तिर्नुपर्ने',
+  highValue: 'ठूलो रकम',
   endOfDaySummary: 'दिनको सारांश',
   reviewProgress: 'प्रगति समीक्षा गर्नुहोस् र प्रतिवेदन पेश गर्नुहोस्',
 

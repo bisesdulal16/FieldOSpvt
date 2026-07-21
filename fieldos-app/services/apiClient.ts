@@ -103,6 +103,17 @@ export function clearTokens(): void {
   } catch { /* fallback silently */ }
 }
 
+/**
+ * End the in-memory session (return the app to the login screen) WITHOUT deleting
+ * the persisted token from secure storage — so a field-friendly logout can still
+ * allow an OFFLINE re-login within the token's lifetime. See authService.logout.
+ */
+export function endSessionInMemory(): void {
+  _accessToken = null;
+  _refreshToken = null;
+  _currentStaffId = null;
+}
+
 export function isAuthenticated(): boolean {
   return !!_accessToken;
 }

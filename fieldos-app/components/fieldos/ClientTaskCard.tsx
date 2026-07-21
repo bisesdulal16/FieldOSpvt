@@ -5,7 +5,16 @@ import { useRouter } from 'expo-router';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
 import { useFieldOSStore } from '../../store/useFieldOSStore';
 import { StatusChip } from './StatusChip';
+import { useTranslation } from '../../i18n';
 import type { StatusVariant } from '../../types';
+
+// Map the status variant to a translated chip label so it localizes (G6).
+const STATUS_LABEL_KEY: Record<string, string> = {
+  overdue: 'overdue',
+  'due-today': 'dueToday',
+  promise: 'followUp',
+  'high-value': 'highValue',
+};
 
 interface ClientTaskCardProps {
   name: string;
@@ -33,6 +42,9 @@ export function ClientTaskCard({
   onCollect,
 }: ClientTaskCardProps) {
   const router = useRouter();
+  const { t } = useTranslation();
+  const labelKey = STATUS_LABEL_KEY[status];
+  const chipLabel = labelKey ? t(labelKey as any) : statusLabel;
   const { setSelectedClient } = useFieldOSStore();
 
   const safeName = name || 'Unknown Client';
@@ -62,7 +74,7 @@ export function ClientTaskCard({
               <Text style={styles.memberId}>{safeMemberId}</Text>
             </View>
           </View>
-          <StatusChip label={statusLabel} variant={status} />
+          <StatusChip label={chipLabel} variant={status} />
         </View>
 
         <View style={styles.metaRow}>

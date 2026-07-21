@@ -83,9 +83,11 @@ export default function RecordCollectionScreen() {
     captureGps();
   };
 
-  const client = selectedClient || { id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
-  const dueAmount = selectedClient?.dueAmount || 0;
-  const outstanding = selectedClient?.outstandingBalance || 0;
+  // Past the `if (!selectedClient)` guard below, a client is always selected — no
+  // placeholder fallback (the old hardcoded M-1042 caused 0-due/ghost-client bugs).
+  const client = selectedClient ?? { id: '', name: '', memberId: '' };
+  const dueAmount = Number(selectedClient?.dueAmount) || 0;
+  const outstanding = Number(selectedClient?.outstandingBalance) || 0;
   const amount = parseInt(collectionAmount) || 0;
   const isHighValue = amount >= 10000;
 
@@ -155,6 +157,7 @@ export default function RecordCollectionScreen() {
         gpsLatitude: gps?.lat,
         gpsLongitude: gps?.lng,
         gpsAccuracyMeters: gps?.accuracy,
+        gpsAddress: gps?.address,
       });
       console.log('[Collection] Saved:', result.data?.receiptId);
 

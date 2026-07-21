@@ -24,8 +24,9 @@
         "EXPO_PUBLIC_ENABLE_MOCK_SYNC": "false",
         "EXPO_PUBLIC_FACE_MODEL_URL": "https://fieldos.hackdome.online/dl/mobilefacenet.tflite",
         "EXPO_PUBLIC_FACE_THRESHOLD": "0.62",
-        "EXPO_PUBLIC_FACE_NORM": "signed",
-        "EXPO_PUBLIC_FACE_DEBUG": "true"
+        "EXPO_PUBLIC_FACE_NORM": "unit",
+        "EXPO_PUBLIC_FACE_DEBUG": "true",
+        "EXPO_PUBLIC_FACE_CLOCKIN": "true"
       }
     },
     "production": {

@@ -77,6 +77,8 @@ function mapEventToPayload(event: SyncQueueEvent): LocalSyncPayload {
     faceVerified: 'face_verified',
     gpsLatitude: 'gps_latitude',
     gpsLongitude: 'gps_longitude',
+    gpsAccuracyMeters: 'gps_accuracy_meters',
+    gpsAddress: 'gps_address',
     dueAmount: 'due_amount',
     outstandingAfter: 'outstanding_after',
   };

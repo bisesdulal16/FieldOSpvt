@@ -23,6 +23,9 @@ import { isEnrolled, verifyEmbedding, FACE_MATCH_THRESHOLD } from '../../service
 // Tuning aid: when EXPO_PUBLIC_FACE_DEBUG=true, every clock-in shows the raw
 // similarity score so the threshold can be calibrated on real devices/faces (F4).
 const FACE_DEBUG = process.env.EXPO_PUBLIC_FACE_DEBUG === 'true';
+// Face clock-in is OFF by default for the pilot (unproven accuracy — the day-start
+// selfie is the real control). Set EXPO_PUBLIC_FACE_CLOCKIN=true for tuning builds.
+const FACE_CLOCKIN_ENABLED = process.env.EXPO_PUBLIC_FACE_CLOCKIN === 'true';
 import { getActivePromises } from '../../db/repositories/promiseToPayRepo';
 import { getTotalCollectedToday } from '../../db/repositories/collectionsRepo';
 import { query } from '../../db/database';
@@ -71,6 +74,11 @@ export default function DashboardScreen() {
   const handleStartDay = useCallback(async () => {
     if (startingDay) return;
     setStartingDay(true);
+    if (!FACE_CLOCKIN_ENABLED) {
+      // Pilot: skip face-match, use plain selfie photo-proof as the control.
+      finishDayStart(null);
+      return;
+    }
     const enrolled = await isEnrolled();
     if (enrolled) {
       setShowFaceScan(true); // the FaceScanner overlay drives the rest
@@ -98,12 +106,8 @@ export default function DashboardScreen() {
         ),
       );
     }
-    if (!face.verified) {
-      // Include the score so a rejected officer (and support) can see how close it was.
-      Alert.alert(t('faceNoMatchTitle'), `${t('faceNoMatchMsg')}\n\n${scoreLine}`);
-      setStartingDay(false);
-      return;
-    }
+    // Face-match is INFORMATIONAL for the pilot (the day-start selfie is the control):
+    // record the result + score for the manager, but never block the officer's day on it.
     await finishDayStart(face);
   }, [finishDayStart, t]);
 

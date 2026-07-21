@@ -45,6 +45,8 @@ const en = {
   syncNow: 'Sync Now',
   priorityClient: 'Priority Client',
   overdue: 'Overdue',
+  dueToday: 'Due Today',
+  highValue: 'High Value',
   endOfDaySummary: 'End-of-Day Summary',
   reviewProgress: 'Review progress and submit report',
 

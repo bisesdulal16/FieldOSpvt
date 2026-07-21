@@ -10,7 +10,7 @@ import { PrimaryButton } from '../../components/fieldos/PrimaryButton';
 import { SecondaryButton } from '../../components/fieldos/SecondaryButton';
 import { initSecureStorage } from '../../services/secureStorage';
 import { biometricLogin, isBiometricAvailable } from '../../services/biometricAuth';
-import { loginWithPin, loginWithBiometric, initAuth, getCurrentUser, setResumePin, verifyResumePin, hasResumePin } from '../../services/authService';
+import { loginWithPin, loginWithBiometric, initAuth, getCurrentUser, setResumePin, verifyResumePin, hasResumePin, offlineLogin, setOfflineLogin, isSignedOut, clearSignedOut } from '../../services/authService';
 import { getAccessToken } from '../../services/apiClient';
 import { setSetting, getSetting } from '../../db/repositories/settingsRepo';
 import { fetchBranding, DEFAULT_BRANDING, type Branding } from '../../services/brandingService';
@@ -47,6 +47,8 @@ export default function LoginScreen() {
       // morning keeps a valid 24h token, so reopening the app offline should NOT force a
       // network login. If a recent session + cached profile exist, go straight to the app.
       try {
+        // After an explicit logout, always show the login screen (no silent resume).
+        if (await isSignedOut()) throw new Error('signed-out');
         const token = getAccessToken();
         const lastLoginAt = await getSetting('last_login_at');
         const fresh = !!lastLoginAt && (Date.now() - Number(lastLoginAt)) < SESSION_RESUME_MS;
@@ -81,17 +83,29 @@ export default function LoginScreen() {
       pin,
     });
 
-    setLoginLoading(false);
-
     if (result.success) {
+      setLoginLoading(false);
       auditLogin('pin').catch(() => {});
-      // Remember this login for offline resume, then restore THIS officer's day-start
-      // (do NOT wipe it — one start-day per officer per day, until EOD).
+      // Remember this login for offline resume + offline re-login, then restore THIS
+      // officer's day-start (do NOT wipe it — one start-day per officer per day).
       try { await setSetting('last_login_at', String(Date.now()), 'string'); } catch {}
       const sid = staffIdOf(result.data?.user) || staffId;
-      // Store a local resume PIN so a later offline reopen can confirm identity.
       await setResumePin(sid, pin);
+      await setOfflineLogin(sid, pin);   // enables offline re-login after a logout
+      await clearSignedOut();
       await restoreDayForOfficer(sid);
+      router.replace('/(tabs)');
+      return;
+    }
+
+    // Online login failed — if we're offline, try a local PIN login against the
+    // cached credential (an officer who signed out in the field, no signal).
+    const offline = await offlineLogin(staffId, pin);
+    setLoginLoading(false);
+    if (offline.ok) {
+      auditLogin('pin').catch(() => {});
+      await setResumePin(staffId, pin);
+      await restoreDayForOfficer(staffIdOf(offline.user) || staffId);
       router.replace('/(tabs)');
     } else {
       Alert.alert(t('authFailed'), result.message || t('tryAgain'));
