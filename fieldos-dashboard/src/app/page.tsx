@@ -155,10 +155,8 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'day-starts', label: 'Day-Start Attendance', icon: <MapPin className="h-5 w-5" /> },
   { id: 'staff-map', label: 'Staff Map', icon: <MapPin className="h-5 w-5" /> },
   { id: 'cash-anomalies', label: 'Cash & Anomalies', icon: <ShieldAlert className="h-5 w-5" /> },
-  { id: 'officer-activity', label: 'Officer Activity', icon: <Users className="h-5 w-5" /> },
   { id: 'pilot-kpis', label: 'Pilot Metrics', icon: <BarChart3 className="h-5 w-5" /> },
   { id: 'data-sync', label: 'CBS Data Sync', icon: <GitCompareArrows className="h-5 w-5" /> },
-  { id: 'sync-log', label: 'Sync Log', icon: <RefreshCw className="h-5 w-5" /> },
   { id: 'assign-task', label: 'Assign Task', icon: <Plus className="h-5 w-5" /> },
   { id: 'announcements', label: 'Announcements', icon: <Bell className="h-5 w-5" /> },
 ];
@@ -6228,6 +6226,7 @@ export default function DashboardPage() {
                 </button>
               );
             })}
+            {!PILOT_MODE && (<>
             <div className="my-3 border-t border-white/10" />
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2 flex items-center gap-1.5">
               <Sparkles className="h-3 w-3 text-amber-400" /> AI Intelligence v1
@@ -6253,6 +6252,7 @@ export default function DashboardPage() {
                 </button>
               );
             })}
+            </>)}
             {!PILOT_MODE && (<>
             <div className="my-3 border-t border-white/10" />
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2 flex items-center gap-1.5">
