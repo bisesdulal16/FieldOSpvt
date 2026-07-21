@@ -55,6 +55,18 @@ export interface ApiClientError {
 
 let _accessToken: string | null = null;
 let _refreshToken: string | null = null;
+// The staff_id of the officer currently signed in on this device. Used to stamp
+// offline sync-queue items so one officer's queued actions never sync (and get
+// mis-attributed) under a different officer who later logs in on the same device.
+let _currentStaffId: string | null = null;
+
+export function setCurrentStaffId(staffId: string | null): void {
+  _currentStaffId = staffId || null;
+}
+
+export function getCurrentStaffId(): string | null {
+  return _currentStaffId;
+}
 
 export function setTokens(accessToken: string, refreshToken: string): void {
   _accessToken = accessToken;
@@ -84,6 +96,7 @@ export async function loadTokens(): Promise<void> {
 export function clearTokens(): void {
   _accessToken = null;
   _refreshToken = null;
+  _currentStaffId = null;
   try {
     SecureStore.deleteItemAsync('fieldos_access_token');
     SecureStore.deleteItemAsync('fieldos_refresh_token');

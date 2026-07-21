@@ -239,12 +239,49 @@ export async function registerDevice(req: DeviceRegisterRequest): Promise<ApiRes
   return await response.json();
 }
 
+// ─── Offline resume PIN ──────────────────────────────────────────
+// A lightweight "is this really you?" check when the app resumes an existing
+// session offline (no network to re-auth against). The PIN lives in SecureStore,
+// which is hardware-encrypted at rest (Keychain / Keystore) — the same store that
+// already holds the far more powerful bearer token. It is cleared on logout.
+// (Upgrade path: replace with a salted SHA-256 via expo-crypto if desired.)
+const RESUME_PIN_KEY = 'fieldos_resume_pin';
+const RESUME_STAFF_KEY = 'fieldos_resume_staff';
+
+export async function setResumePin(staffId: string, pin: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(RESUME_PIN_KEY, pin);
+    await SecureStore.setItemAsync(RESUME_STAFF_KEY, staffId);
+  } catch { /* best effort — resume simply falls back to online login */ }
+}
+
+/** True when a resume PIN has been stored (i.e. offline resume can be gated). */
+export async function hasResumePin(): Promise<boolean> {
+  try { return !!(await SecureStore.getItemAsync(RESUME_PIN_KEY)); } catch { return false; }
+}
+
+/** Verify a PIN entered on the offline resume screen. */
+export async function verifyResumePin(pin: string): Promise<boolean> {
+  try {
+    const stored = await SecureStore.getItemAsync(RESUME_PIN_KEY);
+    return !!stored && stored === pin;
+  } catch { return false; }
+}
+
+async function clearResumePin(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(RESUME_PIN_KEY);
+    await SecureStore.deleteItemAsync(RESUME_STAFF_KEY);
+  } catch { /* silent */ }
+}
+
 /**
- * Logout — clear tokens, user profile, and local session.
+ * Logout — clear tokens, user profile, resume PIN, and local session.
  */
 export async function logout(): Promise<void> {
   clearTokens();
   try { SecureStore.deleteItemAsync('fieldos_user_profile'); } catch {}
+  await clearResumePin();
   await mockDelay(200);
 }
 

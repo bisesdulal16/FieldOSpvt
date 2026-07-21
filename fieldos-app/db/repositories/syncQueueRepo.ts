@@ -1,4 +1,5 @@
 import { query, mutate, insertAndGetId } from '../database';
+import { getCurrentStaffId } from '../../services/apiClient';
 
 /**
  * Sync Queue Repository — Phase 2: Real Offline Queue
@@ -96,10 +97,12 @@ export async function enqueueSyncEvent(
   entityId?: number
 ): Promise<number> {
   const eid = entityId ?? 0;
+  // Stamp the creating officer so the drain can scope by officer (O1c).
+  const staffId = getCurrentStaffId();
   return insertAndGetId(
-    `INSERT INTO sync_queue (entity_type, entity_id, operation, payload_json, status)
-     VALUES (?, ?, 'create', ?, 'pending_sync')`,
-    [type, eid, JSON.stringify(payload)]
+    `INSERT INTO sync_queue (entity_type, entity_id, operation, payload_json, status, staff_id)
+     VALUES (?, ?, 'create', ?, 'pending_sync', ?)`,
+    [type, eid, JSON.stringify(payload), staffId]
   );
 }
 
@@ -117,8 +120,15 @@ export async function getAllQueueEvents(): Promise<SyncQueueEvent[]> {
  * Get pending events (not yet synced).
  */
 export async function getPendingEvents(): Promise<SyncQueueEvent[]> {
+  // Drain only the current officer's items (plus legacy/system items with no
+  // staff_id) so another officer's queued actions can't sync under this token (O1c).
+  // Items stamped with a *different* officer stay pending until that officer logs in.
+  const staffId = getCurrentStaffId();
   const rows = await query<SyncQueueRow>(
-    "SELECT * FROM sync_queue WHERE status = 'pending_sync' ORDER BY created_at ASC"
+    `SELECT * FROM sync_queue
+      WHERE status = 'pending_sync' AND (staff_id IS NULL OR staff_id = ?)
+      ORDER BY created_at ASC`,
+    [staffId]
   );
   return rows.map(mapRowToEvent);
 }

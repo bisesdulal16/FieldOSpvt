@@ -90,6 +90,15 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  // O1c: stamp each offline sync-queue item with the officer who created it, so one
+  // officer's queued actions never drain (and get mis-attributed) under a different
+  // officer who logs in on the same device. Existing rows stay NULL (legacy/system).
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE sync_queue ADD COLUMN staff_id TEXT;
+    `,
+  },
 ];
 
 /**

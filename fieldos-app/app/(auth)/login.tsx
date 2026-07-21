@@ -10,15 +10,21 @@ import { PrimaryButton } from '../../components/fieldos/PrimaryButton';
 import { SecondaryButton } from '../../components/fieldos/SecondaryButton';
 import { initSecureStorage } from '../../services/secureStorage';
 import { biometricLogin, isBiometricAvailable } from '../../services/biometricAuth';
-import { loginWithPin, loginWithBiometric, initAuth } from '../../services/authService';
-import { setSetting } from '../../db/repositories/settingsRepo';
+import { loginWithPin, loginWithBiometric, initAuth, getCurrentUser, setResumePin, verifyResumePin, hasResumePin } from '../../services/authService';
+import { getAccessToken } from '../../services/apiClient';
+import { setSetting, getSetting } from '../../db/repositories/settingsRepo';
 import { fetchBranding, DEFAULT_BRANDING, type Branding } from '../../services/brandingService';
 import { useTranslation } from '../../i18n';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { showPassword, togglePassword, language, resetDay } = useFieldOSStore();
+  const { showPassword, togglePassword, language, restoreDayForOfficer } = useFieldOSStore();
   const { t } = useTranslation();
+
+  // Backend returns snake_case (staff_id); the mock/types use camelCase (staffId).
+  const staffIdOf = (user: any): string | undefined => user?.staffId || user?.staff_id;
+  // JWT lasts 24h; keep a margin so an expired session forces an online re-login.
+  const SESSION_RESUME_MS = 20 * 60 * 60 * 1000;
 
   const [staffId, setStaffId] = useState('');
   const [pin, setPin] = useState('');
@@ -27,22 +33,47 @@ export default function LoginScreen() {
   const [bioLoading, setBioLoading] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [branding, setBranding] = useState<Branding>(DEFAULT_BRANDING);
+  // Offline resume lock: a valid session exists, but confirm identity with the PIN.
+  const [resumeUser, setResumeUser] = useState<{ staffId: string; name?: string } | null>(null);
+  const [resumePinInput, setResumePinInput] = useState('');
+  const [resumeError, setResumeError] = useState('');
+  const [resumeLoading, setResumeLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
       await initAuth(); // Load tokens from secure storage
+      await initSecureStorage();
+      // Offline-friendly session resume: an officer who logged in at the branch in the
+      // morning keeps a valid 24h token, so reopening the app offline should NOT force a
+      // network login. If a recent session + cached profile exist, go straight to the app.
+      try {
+        const token = getAccessToken();
+        const lastLoginAt = await getSetting('last_login_at');
+        const fresh = !!lastLoginAt && (Date.now() - Number(lastLoginAt)) < SESSION_RESUME_MS;
+        if (token && fresh) {
+          const user = await getCurrentUser();
+          const sid = staffIdOf(user);
+          if (sid) {
+            // If a resume PIN was set, confirm identity before entering (offline-safe).
+            if (await hasResumePin()) {
+              setResumeUser({ staffId: sid, name: (user as any)?.name });
+              return; // render the PIN lock instead of the login form
+            }
+            await restoreDayForOfficer(sid);
+            router.replace('/(tabs)');
+            return;
+          }
+        }
+      } catch { /* fall through to the login form */ }
       const bio = await isBiometricAvailable();
       setBioAvailable(bio.available);
       setBioType(bio.biometricType || '');
-      await initSecureStorage();
       setBranding(await fetchBranding());
     })();
   }, []);
 
   const handlePinLogin = async () => {
     setLoginLoading(true);
-    resetDay();
-    try { await setSetting('day_started', 'false', 'boolean'); } catch {}
 
     // Use authService — mock in dev, real API in production
     const result = await loginWithPin({
@@ -54,9 +85,31 @@ export default function LoginScreen() {
 
     if (result.success) {
       auditLogin('pin').catch(() => {});
+      // Remember this login for offline resume, then restore THIS officer's day-start
+      // (do NOT wipe it — one start-day per officer per day, until EOD).
+      try { await setSetting('last_login_at', String(Date.now()), 'string'); } catch {}
+      const sid = staffIdOf(result.data?.user) || staffId;
+      // Store a local resume PIN so a later offline reopen can confirm identity.
+      await setResumePin(sid, pin);
+      await restoreDayForOfficer(sid);
       router.replace('/(tabs)');
     } else {
       Alert.alert(t('authFailed'), result.message || t('tryAgain'));
+    }
+  };
+
+  const handleResumeUnlock = async () => {
+    setResumeError('');
+    setResumeLoading(true);
+    const ok = await verifyResumePin(resumePinInput);
+    setResumeLoading(false);
+    if (ok && resumeUser) {
+      auditLogin('pin').catch(() => {});
+      await restoreDayForOfficer(resumeUser.staffId);
+      router.replace('/(tabs)');
+    } else {
+      setResumeError(t('incorrectPin'));
+      setResumePinInput('');
     }
   };
 
@@ -74,12 +127,70 @@ export default function LoginScreen() {
 
       if (authResult.success) {
         auditLogin('biometric').catch(() => {});
+        try { await setSetting('last_login_at', String(Date.now()), 'string'); } catch {}
+        await restoreDayForOfficer(staffIdOf(authResult.data?.user) || '');
         router.replace('/(tabs)');
       }
     } else {
       Alert.alert(t('authFailed'), result.error || t('tryAgain'));
     }
   };
+
+  // Offline resume lock — a valid session exists; confirm the officer's PIN before entering.
+  if (resumeUser) {
+    return (
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        <View style={styles.topSection}>
+          <View style={styles.logoContainer}>
+            {branding.logoUrl ? (
+              <Image source={{ uri: branding.logoUrl }} style={styles.logoImage} resizeMode="contain" />
+            ) : (
+              <View style={styles.logoBox}>
+                <Ionicons name="lock-closed" size={28} color={colors.white} />
+              </View>
+            )}
+            <Text style={styles.appTitle}>{t('welcomeBack')}</Text>
+            {!!resumeUser.name && <Text style={styles.appSubTitle}>{resumeUser.name.toUpperCase()}</Text>}
+          </View>
+        </View>
+
+        <View style={styles.formSection}>
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>{t('confirmYourPin')}</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="lock-closed" size={16} color={colors.gray400} />
+              <TextInput
+                style={[styles.inputField, { flex: 1 }]}
+                value={resumePinInput}
+                onChangeText={(v) => { setResumePinInput(v); setResumeError(''); }}
+                placeholder="••••••"
+                placeholderTextColor={colors.gray400}
+                secureTextEntry
+                keyboardType="number-pad"
+                autoFocus
+                onSubmitEditing={handleResumeUnlock}
+              />
+            </View>
+            {!!resumeError && <Text style={styles.errorText}>{resumeError}</Text>}
+
+            <PrimaryButton onPress={handleResumeUnlock} loading={resumeLoading} style={{ marginTop: spacing.md }}>
+              {t('unlock')}
+            </PrimaryButton>
+
+            <TouchableOpacity
+              style={styles.switchAccount}
+              onPress={() => { setResumeUser(null); setResumePinInput(''); setResumeError(''); }}
+            >
+              <Text style={styles.switchAccountText}>{t('loginAsSomeoneElse')}</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ marginTop: spacing.md }}>
+            <SecurityTrustCard />
+          </View>
+        </View>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -252,6 +363,9 @@ const styles = StyleSheet.create({
   inputPlaceholder: { fontSize: fontSize.md, color: colors.gray400 },
   forgotPin: { alignSelf: 'flex-end', marginTop: spacing.sm },
   forgotPinText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.navy },
+  errorText: { fontSize: fontSize.sm, color: colors.red, marginTop: spacing.sm },
+  switchAccount: { alignSelf: 'center', marginTop: spacing.md, paddingVertical: spacing.sm },
+  switchAccountText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.navy },
   bioUnavailableRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: spacing.sm, marginTop: spacing.sm, paddingVertical: spacing.sm,

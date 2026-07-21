@@ -21,6 +21,7 @@ import {
   auditSyncFailed,
 } from '../services/auditService';
 import { logEvent } from '../db/repositories/auditRepo';
+import { setCurrentStaffId } from '../services/apiClient';
 import {
   runSync,
   retryFailedAndSync,
@@ -41,8 +42,11 @@ interface FieldOSState {
   // Day management
   dayStarted: boolean;
   dayVerifiedAt: string | null;
+  currentStaffId: string | null;
   startDay: () => Promise<void>;
   resetDay: () => void;
+  // Restore this officer's day-start for today (survives re-login until EOD).
+  restoreDayForOfficer: (staffId: string) => Promise<void>;
 
   // Face verification
   showFaceVerification: boolean;
@@ -119,18 +123,22 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
   // Day management
   dayStarted: false,
   dayVerifiedAt: null,
+  currentStaffId: null,
   startDay: async () => {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const staffId = get().currentStaffId;
     set({ dayStarted: true, dayVerifiedAt: timeStr, showFaceVerification: false });
-    // Persist day status
+    // Persist day status, scoped to this officer + date so it survives re-login
+    // (and offline reopen) until EOD — one start-day per officer per day.
     await setSetting('day_started', 'true', 'boolean');
     await setSetting('day_started_at', now.toISOString(), 'string');
+    if (staffId) await setSetting('day_started_staff', staffId, 'string');
     // Audit log — start day
     await auditStartDay(timeStr);
-    // Legacy audit (for backward compat)
+    // Legacy audit (for backward compat) — attribute to the real officer, not a hardcoded id
     try {
-      await logEvent('day_started', 'FO-208', 'settings', undefined, { time: timeStr });
+      await logEvent('day_started', staffId || 'unknown', 'settings', undefined, { time: timeStr });
     } catch { /* silent */ }
     // Enqueue sync event for start day
     try {
@@ -140,6 +148,33 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
 
   resetDay: () => {
     set({ dayStarted: false, dayVerifiedAt: null });
+  },
+
+  restoreDayForOfficer: async (staffId: string) => {
+    set({ currentStaffId: staffId });
+    setCurrentStaffId(staffId); // stamp session for offline-queue scoping (O1c)
+    try {
+      const started = await getSetting('day_started');
+      const startedStaff = await getSetting('day_started_staff');
+      const startedAt = await getSetting('day_started_at');
+      if (started === 'true' && startedStaff === staffId && startedAt) {
+        const d = new Date(startedAt);
+        const today = new Date();
+        const sameDay =
+          d.getFullYear() === today.getFullYear() &&
+          d.getMonth() === today.getMonth() &&
+          d.getDate() === today.getDate();
+        if (sameDay) {
+          const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          set({ dayStarted: true, dayVerifiedAt: timeStr });
+          return;
+        }
+      }
+      // No active day for THIS officer today → they must start their day.
+      set({ dayStarted: false, dayVerifiedAt: null });
+    } catch {
+      set({ dayStarted: false, dayVerifiedAt: null });
+    }
   },
 
   // Face verification (kept in-memory only — transient UI state)
