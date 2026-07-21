@@ -8,7 +8,7 @@ import { AppHeader } from '../../components/fieldos/AppHeader';
 import { StatusChip } from '../../components/fieldos/StatusChip';
 import { PrivacyNoteCard } from '../../components/fieldos/PrivacyNoteCard';
 import { auditLogout } from '../../services/auditService';
-import { setSetting, getSetting } from '../../db/repositories/settingsRepo';
+import { getSetting } from '../../db/repositories/settingsRepo';
 import { logout, clearAllSecureData, formatLastSyncTime } from '../../services';
 import { useTranslation } from '../../i18n';
 
@@ -130,7 +130,9 @@ export default function ProfileScreen() {
               await auditLogout();
               await clearAllSecureData();
               await logout();
-              await setSetting('day_started', 'false', 'boolean');
+              // NOTE: do NOT reset day_started here — a logout must not end the
+              // officer's day. It persists per-officer until EOD, so the same
+              // officer logging back in the same day stays "day started".
             } catch (e) { /* silent */ }
             router.replace('/login');
           }} style={styles.logoutButton}>
