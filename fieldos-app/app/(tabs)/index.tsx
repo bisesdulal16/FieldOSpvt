@@ -18,7 +18,11 @@ import { fetchAssignedTasks } from '../../services/taskService';
 import { startDayWithVerification, captureSelfie } from '../../services/dayStartService';
 import type { FaceResult } from '../../services/dayStartService';
 import { FaceScanner } from '../../components/fieldos/FaceScanner';
-import { isEnrolled, verifyEmbedding } from '../../services/faceVerifyService';
+import { isEnrolled, verifyEmbedding, FACE_MATCH_THRESHOLD } from '../../services/faceVerifyService';
+
+// Tuning aid: when EXPO_PUBLIC_FACE_DEBUG=true, every clock-in shows the raw
+// similarity score so the threshold can be calibrated on real devices/faces (F4).
+const FACE_DEBUG = process.env.EXPO_PUBLIC_FACE_DEBUG === 'true';
 import { getActivePromises } from '../../db/repositories/promiseToPayRepo';
 import { getTotalCollectedToday } from '../../db/repositories/collectionsRepo';
 import { query } from '../../db/database';
@@ -83,8 +87,20 @@ export default function DashboardScreen() {
   const handleFaceEmbedding = useCallback(async (embedding: number[]) => {
     setShowFaceScan(false);
     const face = await verifyEmbedding(embedding);
+    const scoreLine = `${t('faceScoreLabel')}: ${face.similarity.toFixed(3)}  (${t('faceThresholdLabel')} ${FACE_MATCH_THRESHOLD})`;
+    // Tuning mode: show the score on every attempt so the threshold can be calibrated.
+    if (FACE_DEBUG) {
+      await new Promise<void>((resolve) =>
+        Alert.alert(
+          face.verified ? t('faceMatchTitle') : t('faceNoMatchTitle'),
+          scoreLine,
+          [{ text: 'OK', onPress: () => resolve() }],
+        ),
+      );
+    }
     if (!face.verified) {
-      Alert.alert(t('faceNoMatchTitle'), t('faceNoMatchMsg'));
+      // Include the score so a rejected officer (and support) can see how close it was.
+      Alert.alert(t('faceNoMatchTitle'), `${t('faceNoMatchMsg')}\n\n${scoreLine}`);
       setStartingDay(false);
       return;
     }

@@ -694,6 +694,9 @@ const en = {
   faceEnrollLater: 'Use photo',
   faceNoMatchTitle: 'Face didn’t match',
   faceNoMatchMsg: 'We couldn’t confirm it’s you. Please try again in good lighting.',
+  faceMatchTitle: 'Face matched',
+  faceScoreLabel: 'Match score',
+  faceThresholdLabel: 'pass mark',
   // Voice notes (audio → transcription)
   voiceRecordPrompt: 'Record a voice note',
   voiceRecording: 'Recording…',

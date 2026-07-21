@@ -23,6 +23,13 @@ const FACE_MODEL_URL =
   process.env.EXPO_PUBLIC_FACE_MODEL_URL ||
   'https://huggingface.co/thanhnew2001/mobilefacenet/resolve/main/mobilefacenet.tflite';
 
+// Input normalization the model expects. Some MobileFaceNet exports want [-1,1]
+// ('signed', default), others [0,1] ('unit'). Switchable via env so it can be
+// tuned on real devices without a code change — the wrong choice makes embeddings
+// non-discriminative (everyone "matches"), which is the F4 false-accept symptom.
+const FACE_NORM = (process.env.EXPO_PUBLIC_FACE_NORM || 'signed').toLowerCase();
+const FACE_NORM_UNIT = FACE_NORM === 'unit'; // [0,1] instead of [-1,1] — primitive, safe to capture in the worklet
+
 // ─── Guarded native imports ──────────────────────────────────────
 let VisionCamera: any = null;
 let FaceDetector: any = null;
@@ -165,9 +172,13 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
         pixelFormat: 'rgb',
         dataType: 'float32',
       });
-      // Normalise to [-1, 1]. DEVICE-TUNE: some MobileFaceNet exports want [0,1] or uint8.
+      // Normalise per EXPO_PUBLIC_FACE_NORM: 'unit' → [0,1], else 'signed' → [-1,1].
       const input = new Float32Array(resized.length);
-      for (let i = 0; i < resized.length; i++) input[i] = (resized[i] - 127.5) / 128.0;
+      if (FACE_NORM_UNIT) {
+        for (let i = 0; i < resized.length; i++) input[i] = resized[i] / 255.0;
+      } else {
+        for (let i = 0; i < resized.length; i++) input[i] = (resized[i] - 127.5) / 128.0;
+      }
 
       const outputs = model.runSync([input]);
       const embedding = Array.from(outputs[0] as Float32Array);

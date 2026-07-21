@@ -694,6 +694,9 @@ const ne = {
   faceEnrollLater: 'फोटो प्रयोग गर्नुहोस्',
   faceNoMatchTitle: 'अनुहार मिलेन',
   faceNoMatchMsg: 'यो तपाईं हो भनेर पुष्टि गर्न सकिएन। राम्रो उज्यालोमा फेरि प्रयास गर्नुहोस्।',
+  faceMatchTitle: 'अनुहार मिल्यो',
+  faceScoreLabel: 'मिलान स्कोर',
+  faceThresholdLabel: 'पास अंक',
   // Voice notes (audio → transcription) / भ्वाइस नोट
   voiceRecordPrompt: 'भ्वाइस नोट रेकर्ड गर्नुहोस्',
   voiceRecording: 'रेकर्ड गर्दै…',
