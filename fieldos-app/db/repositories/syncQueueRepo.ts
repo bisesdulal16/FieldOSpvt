@@ -110,8 +110,11 @@ export async function enqueueSyncEvent(
  * Get all events in the queue, ordered by creation time.
  */
 export async function getAllQueueEvents(): Promise<SyncQueueEvent[]> {
+  // Scope the Sync Center to the current officer (+ legacy/system items) so an
+  // officer never sees another officer's queued/completed work on a shared device.
   const rows = await query<SyncQueueRow>(
-    'SELECT * FROM sync_queue ORDER BY created_at ASC'
+    'SELECT * FROM sync_queue WHERE (staff_id IS NULL OR staff_id = ?) ORDER BY created_at ASC',
+    [getCurrentStaffId()]
   );
   return rows.map(mapRowToEvent);
 }
@@ -151,7 +154,8 @@ export async function getPendingGroupedByType(): Promise<Record<string, SyncQueu
  */
 export async function getFailedEvents(): Promise<SyncQueueEvent[]> {
   const rows = await query<SyncQueueRow>(
-    "SELECT * FROM sync_queue WHERE status = 'failed' ORDER BY updated_at DESC"
+    `SELECT * FROM sync_queue WHERE status = 'failed' AND (staff_id IS NULL OR staff_id = ?) ORDER BY updated_at DESC`,
+    [getCurrentStaffId()]
   );
   return rows.map(mapRowToEvent);
 }
@@ -161,7 +165,8 @@ export async function getFailedEvents(): Promise<SyncQueueEvent[]> {
  */
 export async function getPendingCount(): Promise<number> {
   const rows = await query<{ count: number }>(
-    "SELECT COUNT(*) as count FROM sync_queue WHERE status = 'pending_sync'"
+    `SELECT COUNT(*) as count FROM sync_queue WHERE status = 'pending_sync' AND (staff_id IS NULL OR staff_id = ?)`,
+    [getCurrentStaffId()]
   );
   return rows[0]?.count ?? 0;
 }
@@ -171,7 +176,8 @@ export async function getPendingCount(): Promise<number> {
  */
 export async function getFailedCount(): Promise<number> {
   const rows = await query<{ count: number }>(
-    "SELECT COUNT(*) as count FROM sync_queue WHERE status = 'failed'"
+    `SELECT COUNT(*) as count FROM sync_queue WHERE status = 'failed' AND (staff_id IS NULL OR staff_id = ?)`,
+    [getCurrentStaffId()]
   );
   return rows[0]?.count ?? 0;
 }
@@ -181,7 +187,8 @@ export async function getFailedCount(): Promise<number> {
  */
 export async function getUnsyncedCount(): Promise<number> {
   const rows = await query<{ count: number }>(
-    "SELECT COUNT(*) as count FROM sync_queue WHERE status IN ('pending_sync', 'syncing', 'failed')"
+    `SELECT COUNT(*) as count FROM sync_queue WHERE status IN ('pending_sync', 'syncing', 'failed') AND (staff_id IS NULL OR staff_id = ?)`,
+    [getCurrentStaffId()]
   );
   return rows[0]?.count ?? 0;
 }
@@ -283,7 +290,8 @@ export async function getLastSyncTime(): Promise<string | null> {
  */
 export async function getPendingCountsByType(): Promise<Record<string, number>> {
   const rows = await query<{ entity_type: string; count: number }>(
-    "SELECT entity_type, COUNT(*) as count FROM sync_queue WHERE status IN ('pending_sync', 'syncing', 'failed') GROUP BY entity_type"
+    `SELECT entity_type, COUNT(*) as count FROM sync_queue WHERE status IN ('pending_sync', 'syncing', 'failed') AND (staff_id IS NULL OR staff_id = ?) GROUP BY entity_type`,
+    [getCurrentStaffId()]
   );
   const result: Record<string, number> = {};
   for (const row of rows) {
