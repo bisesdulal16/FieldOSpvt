@@ -38,7 +38,7 @@ export default function ClientDetailScreen() {
   const { selectedClient } = useFieldOSStore();
   const router = useRouter();
   const { t } = useTranslation();
-  const client = selectedClient || { id: '1', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
+  const client = selectedClient || { id: '', name: '', memberId: '' };
   const clientId = Number(client.id) || 1;
   const initials = (client.name || '').split(' ').map(n => n[0]).slice(0, 2).join('');
 

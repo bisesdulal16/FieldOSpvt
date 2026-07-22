@@ -44,7 +44,7 @@ export default function PromiseToPayScreen() {
   const [selectedReason, setSelectedReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
-  const client = selectedClient || { id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
+  const client = selectedClient || { id: '', name: '', memberId: '' };
   const initials = client.name.split(' ').map(n => n[0]).slice(0, 2).join('');
   const outstanding = (selectedClient as any)?.outstandingBalance ?? 0;
   const numericClientId = (selectedClient as any)?.clientId ?? Number(client.id) ?? 0;

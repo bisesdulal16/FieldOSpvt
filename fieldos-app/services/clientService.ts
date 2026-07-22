@@ -113,17 +113,12 @@ export async function searchLocalClients(query: string): Promise<ClientSummary[]
     );
   }
 
-  // Search local DB
+  // Search local DB — never fall back to mock clients (would show fake borrowers).
   try {
     const dbClients = await searchClients(query);
     return dbClients.map(mapDbClient);
   } catch {
-    if (!query.trim()) return MOCK_CLIENTS;
-    const lowerQuery = query.toLowerCase();
-    return MOCK_CLIENTS.filter(c =>
-      c.name.toLowerCase().includes(lowerQuery) ||
-      c.memberId.toLowerCase().includes(lowerQuery)
-    );
+    return [];
   }
 }
 

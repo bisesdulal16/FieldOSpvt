@@ -1,6 +1,6 @@
 // Standalone Center Meeting screen — pushed on Stack from dashboard quick actions.
 // The tab version lives at app/(tabs)/meetings.tsx.
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,33 +12,33 @@ import { PrimaryButton } from '../components/fieldos/PrimaryButton';
 import { SecondaryButton } from '../components/fieldos/SecondaryButton';
 import { enqueueSyncEvent } from '../db/repositories/syncQueueRepo';
 import { auditMeetingCompleted } from '../services/auditService';
+import { fetchClients } from '../services/clientService';
 
-const MEMBERS = [
-  { name: 'Sunita Kumari Chaudhary', id: 'M-1042', status: 'present' as const },
-  { name: 'Rita Maya Tamang', id: 'M-1056', status: 'present' as const },
-  { name: 'Gita Kumari Gupta', id: 'M-1123', status: 'paid' as const },
-  { name: 'Sita Devi Sah', id: 'M-1089', status: 'absent' as const },
-  { name: 'Maya Devi Shrestha', id: 'M-1115', status: 'present' as const },
-  { name: 'Kamala Rai', id: 'M-1035', status: 'paid' as const },
-  { name: 'Bishnu Maya Kami', id: 'M-1048', status: 'follow-up' as const },
-  { name: 'Anita Maharjan', id: 'M-1067', status: 'present' as const },
-  { name: 'Sarita Tharu', id: 'M-1079', status: 'follow-up' as const },
-  { name: 'Nirmala Devi Pun', id: 'M-1091', status: 'paid' as const },
-  { name: 'Laxmi Poudel', id: 'M-1098', status: 'absent' as const },
-  { name: 'Padma Kumari BK', id: 'M-1105', status: 'present' as const },
-  { name: 'Hari Maya Damai', id: 'M-1112', status: 'follow-up' as const },
-  { name: 'Sushila Tamang', id: 'M-1119', status: 'present' as const },
-];
+interface MeetingMember { name: string; id: string; status: 'present' | 'paid' | 'absent' | 'follow-up' }
 
 export default function CenterMeetingScreen() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [memberStatuses, setMemberStatuses] = useState(
-    Object.fromEntries(MEMBERS.map(m => [m.id, m.status]))
-  );
+  const [members, setMembers] = useState<MeetingMember[]>([]);
+  const [memberStatuses, setMemberStatuses] = useState<Record<string, MeetingMember['status']>>({});
   const [completed, setCompleted] = useState(false);
 
-  type Status = 'present' | 'paid' | 'absent' | 'follow-up';
+  type Status = MeetingMember['status'];
+
+  // Load the officer's real clients as the meeting roster (no fake attendees).
+  useEffect(() => {
+    fetchClients().then((res) => {
+      if (res.success && Array.isArray(res.data)) {
+        const roster: MeetingMember[] = res.data.map((c: any) => ({
+          name: c.name,
+          id: String(c.member_id ?? c.memberId ?? c.id),
+          status: 'present',
+        }));
+        setMembers(roster);
+        setMemberStatuses(Object.fromEntries(roster.map((m) => [m.id, m.status])));
+      }
+    }).catch(() => {});
+  }, []);
 
   const updateStatus = (id: string, status: string) => {
     setMemberStatuses(prev => ({ ...prev, [id]: status as Status }));
@@ -133,7 +133,7 @@ export default function CenterMeetingScreen() {
 
             <View style={styles.memberList}>
               <View style={styles.memberListHeader}><Text style={styles.memberListTitle}>{t('memberAttendance')}</Text></View>
-              {MEMBERS.map(member => (
+              {members.map(member => (
                 <View key={member.id} style={styles.memberRow}>
                   <View style={styles.memberAvatar}><Text style={styles.memberAvatarText}>{member.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</Text></View>
                   <View style={{ flex: 1 }}><Text style={styles.memberName} numberOfLines={1}>{member.name}</Text><Text style={styles.memberId}>{member.id}</Text></View>
