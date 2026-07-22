@@ -9,8 +9,15 @@ import { StatusChip } from '../../components/fieldos/StatusChip';
 import { PrivacyNoteCard } from '../../components/fieldos/PrivacyNoteCard';
 import { auditLogout } from '../../services/auditService';
 import { getSetting } from '../../db/repositories/settingsRepo';
-import { logout, clearAllSecureData, formatLastSyncTime } from '../../services';
+import { logout, clearAllSecureData, formatLastSyncTime, getCurrentUser } from '../../services';
 import { useTranslation } from '../../i18n';
+
+// Initials for the avatar from a real name (e.g. "Hari Prasad Koirala" → "HK").
+function initialsOf(name?: string): string {
+  if (!name) return '—';
+  const p = name.trim().split(/\s+/);
+  return ((p[0]?.[0] || '') + (p[p.length - 1]?.[0] || '')).toUpperCase() || '—';
+}
 
 const securityItems = [
   { icon: 'shield-checkmark' as const, tKey: 'securityCenterRow', tDesc: 'securityCenterDesc', variant: 'info' as const, screen: 'security-center' as const },
@@ -28,6 +35,11 @@ export default function ProfileScreen() {
   const { syncStatus, syncItemsReady, syncFailedCount, lastSyncTime, loadSyncStatus } = useFieldOSStore();
   const { t } = useTranslation();
   const [consentGranted, setConsentGranted] = useState(true);
+  const [officer, setOfficer] = useState<any>(null); // the real logged-in officer
+
+  useEffect(() => {
+    getCurrentUser().then((u) => u && setOfficer(u)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const loadConsent = async () => {
@@ -46,16 +58,16 @@ export default function ProfileScreen() {
       <ScrollView style={styles.body} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
           <View style={styles.profileHeader}>
-            <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>RB</Text></View>
+            <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{initialsOf(officer?.name)}</Text></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.profileName}>{t('officerName')}</Text>
+              <Text style={styles.profileName}>{officer?.name || t('officerName')}</Text>
               <Text style={styles.profileRole}>{t('fieldOfficer')}</Text>
-              <Text style={styles.profileBranch}>{t('branchName')}</Text>
+              <Text style={styles.profileBranch}>{officer?.branchName || officer?.branch_name || t('branchName')}</Text>
             </View>
           </View>
           <View style={styles.divider} />
           <View style={styles.profileMeta}>
-            <View style={styles.metaItem}><Ionicons name="person-outline" size={11} color={colors.gray500} /><Text style={styles.metaText}>{t('employeeId')}</Text></View>
+            <View style={styles.metaItem}><Ionicons name="person-outline" size={11} color={colors.gray500} /><Text style={styles.metaText}>{t('employeeId')}: {officer?.staffId || officer?.staff_id || '—'}</Text></View>
             <View style={styles.metaItem}><Ionicons name="phone-portrait-outline" size={11} color={colors.gray500} /><Text style={styles.metaText}>{t('deviceAuthorized')}</Text></View>
             <View style={styles.metaItem}><Ionicons name="cloud-outline" size={11} color={colors.gray500} /><Text style={styles.metaText}>{t('lastSync')}: {formatLastSyncTime(lastSyncTime)}</Text></View>
           </View>

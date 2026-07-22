@@ -10,6 +10,7 @@ import { SummaryCard } from '../components/fieldos/SummaryCard';
 import { PrimaryButton } from '../components/fieldos/PrimaryButton';
 import { SecondaryButton } from '../components/fieldos/SecondaryButton';
 import { ValidationError } from '../components/fieldos/ValidationError';
+import { useFieldOSStore } from '../store/useFieldOSStore';
 import { submitEndOfDayReport } from '../services';
 import { getSetting, setSetting } from '../db/repositories/settingsRepo';
 import { getTotalCollectedToday, getCollectionsByDate } from '../db/repositories/collectionsRepo';
@@ -158,6 +159,12 @@ export default function EndOfDayScreen() {
             faceVerified: false,
           }).then(async () => {
             try { await setSetting('eod_submitted_date', new Date().toISOString().split('T')[0], 'string'); } catch {}
+            // EOD ends the officer's day: clear day-start so it doesn't restore on
+            // next login and the officer isn't shown as "day started" after EOD.
+            try {
+              await setSetting('day_started', 'false', 'boolean');
+              useFieldOSStore.getState().resetDay();
+            } catch {}
             setSubmitted(true);
           }).catch(() => { setSubmitted(true); });
         }} icon="shield">{t('submitMyReport')}</PrimaryButton>

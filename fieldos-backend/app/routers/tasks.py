@@ -75,6 +75,70 @@ async def get_today_tasks(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get tasks")
 
 
+def _priority_for(client: Client, has_task_today: bool) -> dict:
+    """Rank one of the officer's own clients by real overdue/due signals."""
+    overdue = int(client.overdue_days or 0)
+    due = float(client.due_amount or 0)
+    outstanding = float(client.outstanding_balance or 0)
+    npa_risk = overdue >= 30
+    score = overdue * 10 + (5 if due > 0 else 0) + (50 if npa_risk else 0) + (5 if has_task_today else 0)
+    if npa_risk:
+        tier, suggestion = "critical", "At NPA risk — escalate and visit today."
+    elif overdue >= 7:
+        tier, suggestion = "high", f"{overdue} days overdue — prioritise collection."
+    elif overdue > 0:
+        tier, suggestion = "medium", "Overdue — follow up on this installment."
+    elif due > 0:
+        tier, suggestion = "medium", "Installment due — collect on today's visit."
+    else:
+        tier, suggestion = "normal", "No dues outstanding."
+    return {
+        "client_id": client.id, "member_id": client.member_id, "client_name": client.name,
+        "center_name": client.center_name, "assigned_officer": None, "officer_id": None,
+        "overdue_days": overdue, "due_amount_npr": due, "outstanding_npr": outstanding,
+        "status": client.status or "active", "promised_today": False, "missed_visit": False,
+        "npa_risk": npa_risk, "missed_ptp": False, "priority_score": score,
+        "priority_tier": tier, "priority_factors": [], "suggestion": suggestion,
+    }
+
+
+@router.get("/priority", response_model=ApiResponse)
+async def get_priority_queue(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The authenticated officer's OWN clients, ranked by real overdue/due signals.
+    Replaces the old mock priority feed on the app Home. Officer-scoped via the JWT."""
+    try:
+        today_str = today_nepal_str()
+        # Clients this officer has any task for (their book of business).
+        tasks = (await db.execute(
+            select(TaskAssignment).where(TaskAssignment.user_id == current_user.id)
+        )).scalars().all()
+        today_client_ids = {t.client_id for t in tasks if t.task_date == today_str and t.client_id}
+        client_ids = {t.client_id for t in tasks if t.client_id}
+
+        queue: list[dict] = []
+        for cid in client_ids:
+            client = (await db.execute(select(Client).where(Client.id == cid))).scalar_one_or_none()
+            if client:
+                queue.append(_priority_for(client, cid in today_client_ids))
+        queue.sort(key=lambda x: x["priority_score"], reverse=True)
+
+        tier_counts: dict[str, int] = {}
+        for c in queue:
+            tier_counts[c["priority_tier"]] = tier_counts.get(c["priority_tier"], 0) + 1
+
+        return ApiResponse(
+            success=True,
+            data={"total_clients": len(queue), "tier_counts": tier_counts, "queue": queue},
+            timestamp=int(time.time()),
+        )
+    except Exception as e:
+        logger.error(f"Get priority queue error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get priority queue")
+
+
 @router.get("/", response_model=ApiResponse)
 async def get_tasks(
     status_filter: str | None = Query(None, alias="status"),

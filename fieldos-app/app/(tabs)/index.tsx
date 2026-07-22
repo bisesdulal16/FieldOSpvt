@@ -126,6 +126,7 @@ export default function DashboardScreen() {
   const [priorityQueue, setPriorityQueue] = useState<PriorityClient[]>([]);
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [officer, setOfficer] = useState<any>(null); // the real logged-in officer
   const [topClient, setTopClient] = useState<PriorityClient | null>(null);
   const [topSuggestion, setTopSuggestion] = useState<AISuggestion | null>(null);
   const [urgentCount, setUrgentCount] = useState(0);
@@ -166,6 +167,7 @@ export default function DashboardScreen() {
     try {
       setAiLoading(true);
       const user = await getCurrentUser();
+      if (user) setOfficer(user);
       const officerId = user?.id;
 
       const [pqResult, sugResult] = await Promise.all([
@@ -262,10 +264,14 @@ export default function DashboardScreen() {
         />
         <View style={styles.greetingSection}>
           <View>
-            <Text style={styles.greeting}>{t('greeting')}</Text>
+            <Text style={styles.greeting}>
+              {t('greeting')}{officer?.name ? `, ${String(officer.name).split(' ')[0]}` : ''}
+            </Text>
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={10} color={colors.gray500} />
-              <Text style={styles.locationText}>{t('branchName')}</Text>
+              <Text style={styles.locationText}>
+                {officer?.branchName || officer?.branch_name || t('branchName')}
+              </Text>
             </View>
           </View>
           {dayStarted && (
@@ -386,18 +392,7 @@ export default function DashboardScreen() {
                   }
                 }}
               />
-            ) : (
-              <AIRecommendationCard
-                title={t('suggestedFirst')}
-                reason={t('reasonPromiseOverdue8')}
-                clientName="Sunita Kumari Chaudhary"
-                action={t('startVisit')}
-                onAction={() => {
-                  setSelectedClient({ id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042', clientId: 1 });
-                  router.push('/client-detail');
-                }}
-              />
-            )}
+            ) : null}
 
             <Text style={styles.sectionTitle}>{t('quickActions')}</Text>
             <View style={styles.grid2}>
@@ -476,26 +471,10 @@ export default function DashboardScreen() {
               <View style={styles.priorityCard}>
                 <View style={styles.priorityHeader}>
                   <Text style={styles.priorityTitle}>{t('priorityClient')}</Text>
-                  <StatusChip label={t('overdue')} variant="overdue" />
                 </View>
                 <View style={styles.priorityBody}>
-                  <View style={[styles.priorityAvatar, { backgroundColor: colors.red }]}>
-                    <Text style={styles.avatarText}>ST</Text>
-                  </View>
-                  <View style={styles.priorityInfo}>
-                    <Text style={styles.priorityName}>Sita Devi Sah</Text>
-                    <Text style={styles.priorityMeta}>M-1089 · Ward 5, Kalanki</Text>
-                    <Text style={[styles.priorityAmount, { color: colors.red }]}>NPR 15,000</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSelectedClient({ id: 'M-1089', name: 'Sita Devi Sah', memberId: 'M-1089', clientId: 3 });
-                      router.push('/client-detail');
-                    }}
-                    style={styles.chevronButton}
-                  >
-                    <Ionicons name="chevron-forward" size={16} color={colors.gray400} />
-                  </TouchableOpacity>
+                  <Ionicons name="checkmark-circle-outline" size={20} color={colors.green} />
+                  <Text style={[styles.priorityMeta, { marginLeft: spacing.sm }]}>{t('noPriorityClients')}</Text>
                 </View>
               </View>
             )}

@@ -21,7 +21,7 @@ const en = {
 
   // ─── Dashboard ──────────────────────────────────────────────
   home: 'Home',
-  greeting: 'Namaste, Ram',
+  greeting: 'Namaste',
   branchName: 'Kathmandu West Branch',
   dayStarted: 'Day Started',
   startFieldWork: "Start Today's Field Work",
@@ -47,6 +47,7 @@ const en = {
   overdue: 'Overdue',
   dueToday: 'Due Today',
   highValue: 'High Value',
+  noPriorityClients: 'No priority clients right now — you’re all caught up.',
   endOfDaySummary: 'End-of-Day Summary',
   reviewProgress: 'Review progress and submit report',
 
@@ -115,7 +116,7 @@ const en = {
   reportAppIssue: 'Report App Issue',
   contactBranchAdmin: 'Contact Branch/Admin',
   secureLogout: 'Secure Logout',
-  employeeId: 'Employee ID: FO-208',
+  employeeId: 'Employee ID',
   deviceAuthorized: 'Device: Authorized',
   lastSync: 'Last Sync',
   authorized: 'Authorized',

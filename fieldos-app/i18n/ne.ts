@@ -21,7 +21,7 @@ const ne = {
 
   // ─── Dashboard ──────────────────────────────────────────────
   home: 'गृह पृष्ठ',
-  greeting: 'नमस्ते, राम',
+  greeting: 'नमस्ते',
   branchName: 'काठमाडौं पश्चिम शाखा',
   dayStarted: 'दिन सुरु',
   startFieldWork: 'आजको काम सुरु गर्नुहोस्',
@@ -47,6 +47,7 @@ const ne = {
   overdue: 'बक्यौता',
   dueToday: 'आज तिर्नुपर्ने',
   highValue: 'ठूलो रकम',
+  noPriorityClients: 'अहिले कुनै प्राथमिकता ग्राहक छैन — सबै सम्पन्न।',
   endOfDaySummary: 'दिनको सारांश',
   reviewProgress: 'प्रगति समीक्षा गर्नुहोस् र प्रतिवेदन पेश गर्नुहोस्',
 
@@ -115,7 +116,7 @@ const ne = {
   reportAppIssue: 'एप समस्या रिपोर्ट गर्नुहोस्',
   contactBranchAdmin: 'शाखा / प्रशासकलाई सम्पर्क गर्नुहोस्',
   secureLogout: 'सुरक्षित लगआउट',
-  employeeId: 'कर्मचारी ID: FO-208',
+  employeeId: 'कर्मचारी ID',
   deviceAuthorized: 'उपकरण: अधिकृत',
   lastSync: 'अन्तिम सिंक',
   authorized: 'अधिकृत',
