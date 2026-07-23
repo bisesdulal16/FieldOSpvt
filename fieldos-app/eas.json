@@ -28,7 +28,7 @@
         "EXPO_PUBLIC_FACE_DEBUG": "true",
         "EXPO_PUBLIC_FACE_CLOCKIN": "true",
         "EXPO_PUBLIC_ONDEVICE_MODEL_NAME": "gemma3-1b-it-int4.task",
-        "EXPO_PUBLIC_ONDEVICE_MODEL_URL": "https://api.fieldosnepal.tech/static/gemma3-1b-it-int4.task"
+        "EXPO_PUBLIC_ONDEVICE_MODEL_URL": "https://fieldos.hackdome.online/dl/gemma3-1b-it-int4.task"
       }
     },
     "production": {
