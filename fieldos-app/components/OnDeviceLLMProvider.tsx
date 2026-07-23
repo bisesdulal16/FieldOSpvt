@@ -86,8 +86,34 @@ function RealProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Error boundary: the on-device LLM is a best-effort enhancement, NEVER a hard
+// dependency. If useLLM() or the native module throws during render (bad model
+// config, partial native init, low-end device), fall back to rendering the app
+// normally in server-AI mode instead of crashing the whole app on launch.
+class LLMBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.log('[OnDeviceLLM] provider crashed → server-AI fallback', err);
+    try { setOnDeviceLLM('unavailable', null); } catch { /* noop */ }
+  }
+  render() {
+    if (this.state.failed) return <>{this.props.children}</>;
+    return this.props.children as React.ReactElement;
+  }
+}
+
 export function OnDeviceLLMProvider({ children }: { children: React.ReactNode }) {
   // If the native module isn't present, render children as-is (Expo Go safe).
   if (!mediapipe?.useLLM) return <>{children}</>;
-  return <RealProvider>{children}</RealProvider>;
+  return (
+    <LLMBoundary>
+      <RealProvider>{children}</RealProvider>
+    </LLMBoundary>
+  );
 }

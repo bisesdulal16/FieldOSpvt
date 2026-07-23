@@ -22,11 +22,12 @@
       }
     },
     "android": {
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0B1B3A"
       },
-      "package": "np.fieldos.app",
+      "package": "np.fieldos.pilot",
       "permissions": [
         "CAMERA",
         "ACCESS_FINE_LOCATION",
