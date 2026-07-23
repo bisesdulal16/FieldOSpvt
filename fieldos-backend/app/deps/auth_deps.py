@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, Department
 from app.services.auth_service import verify_token
 
 logger = logging.getLogger(__name__)
@@ -163,6 +163,37 @@ def require_role(*allowed_roles: str) -> Callable:
         return current_user
 
     return role_checker
+
+
+# ---------------------------------------------------------------------------
+# require_department — factory for the org-matrix department axis
+# ---------------------------------------------------------------------------
+
+def require_department(*allowed_departments: str) -> Callable:
+    """
+    Returns a dependency that checks the current user's `department` (the org
+    matrix axis from PILOT_SCOPE_V2.md §2), independent of `role`.
+
+    This is what enforces boundaries a single role enum can't express — e.g.
+    walling `admin_it` off from financial data, or restricting feedback triage
+    to operations/audit/head_office. Older rows default to `operations`
+    (see the A2 backfill), so this is safe on pre-migration users.
+
+    Usage:
+        @router.get("/x", dependencies=[Depends(require_department("audit", "head_office"))])
+    """
+
+    async def dept_checker(current_user: User = Depends(get_current_user)) -> User:
+        user_dept = getattr(current_user, "department", None)
+        if user_dept not in allowed_departments:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required department: {', '.join(allowed_departments)}. "
+                       f"Your department: {user_dept}.",
+            )
+        return current_user
+
+    return dept_checker
 
 
 # ---------------------------------------------------------------------------

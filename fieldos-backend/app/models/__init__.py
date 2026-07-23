@@ -1,6 +1,7 @@
 from app.database import Base
 from app.models.user import User
 from app.models.branch import Branch
+from app.models.org_unit import OrgUnit
 from app.models.device import Device
 from app.models.client import Client
 from app.models.loan_account import LoanAccount
@@ -28,6 +29,7 @@ __all__ = [
     "Base",
     "User",
     "Branch",
+    "OrgUnit",
     "Device",
     "Client",
     "LoanAccount",

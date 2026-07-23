@@ -17,7 +17,8 @@ from datetime import timedelta
 
 from app.database import engine, Base, AsyncSessionLocal
 from app.models.branch import Branch
-from app.models.user import User
+from app.models.org_unit import OrgUnit, OrgUnitType
+from app.models.user import User, Department, DataScope, PermissionSet
 from app.models.client import Client
 from app.models.loan_account import LoanAccount
 from app.models.loan_schedule import LoanScheduleItem
@@ -84,20 +85,76 @@ async def seed():
         s.add(branch)
         await s.flush()
 
+        # --- Org tree (PILOT_SCOPE_V2.md §2 / §8-A): HO -> branch -> center ---
+        # NO region tier for the pilot (decision 2026-07-23) — the schema supports
+        # `region` but we don't seed a level we won't populate. `code` mirrors the
+        # CBS `.`-delimited join key so a real import can later match/extend this tree.
+        ho = OrgUnit(type=OrgUnitType.HO.value, name="Asha Laghubitta — Head Office",
+                     name_ne="आशा लघुवित्त — प्रधान कार्यालय", code="000")
+        s.add(ho)
+        await s.flush()
+        branch_unit = OrgUnit(type=OrgUnitType.BRANCH.value, name=branch.name, name_ne=branch.name_ne,
+                              code="0042", parent_id=ho.id, branch_id=branch.id)
+        s.add(branch_unit)
+        await s.flush()
+        # One OrgUnit per demo center, keyed by the seed's center code (CTR-00x).
+        center_units: dict[str, OrgUnit] = {}
+        for idx, (ccode, cname) in enumerate([("CTR-001", "Kalanki Center"),
+                                              ("CTR-002", "Swoyambhu Center"),
+                                              ("CTR-003", "Balaju Center")], start=1):
+            cu = OrgUnit(type=OrgUnitType.CENTER.value, name=cname,
+                         code=f"0042.{idx:03d}", parent_id=branch_unit.id)
+            s.add(cu)
+            center_units[ccode] = cu
+        await s.flush()
+
         officers = [
             User(staff_id="FO-208", name="Ram Bahadur Shah", name_ne="राम बहादुर शाह",
                  role="field_officer", hashed_pin=hash_pin("1234"), branch_id=branch.id,
+                 department=Department.OPERATIONS.value, data_scope=DataScope.OWN.value,
+                 permission_set=PermissionSet.WRITE.value, org_unit_id=branch_unit.id,
                  phone_number="+977-9841234567", is_active=True),
             User(staff_id="FO-209", name="Hari Prasad Koirala", name_ne="हरि प्रसाद कोइराला",
                  role="field_officer", hashed_pin=hash_pin("1234"), branch_id=branch.id,
+                 department=Department.OPERATIONS.value, data_scope=DataScope.OWN.value,
+                 permission_set=PermissionSet.WRITE.value, org_unit_id=branch_unit.id,
                  phone_number="+977-9841234569", is_active=True),
         ]
         manager = User(staff_id="BM-001", name="Suman Karki", name_ne="सुमन कार्की",
                        role="branch_manager", hashed_pin=hash_pin("1234"), branch_id=branch.id,
+                       department=Department.OPERATIONS.value, data_scope=DataScope.BRANCH.value,
+                       permission_set=PermissionSet.WRITE.value, org_unit_id=branch_unit.id,
                        phone_number="+977-9841234568", is_active=True)
         for u in officers:
             s.add(u)
         s.add(manager)
+        await s.flush()
+
+        # Officers report to the branch manager (operations chain only).
+        for u in officers:
+            u.manager_id = manager.id
+
+        # --- The three new department users that make the matrix visible day one ---
+        # (§2.4: these don't exist in the field-officer-only seed today.)
+        # Audit/Monitoring: reads ACROSS the org, flags, never writes financial data.
+        monitor = User(staff_id="MON-001", name="Anjali Rana (Monitoring)", name_ne="अन्जली राणा",
+                       role="area_manager", hashed_pin=hash_pin("1234"), branch_id=branch.id,
+                       department=Department.AUDIT.value, data_scope=DataScope.ORG.value,
+                       permission_set=f"{PermissionSet.READ.value},{PermissionSet.FLAG.value}",
+                       org_unit_id=ho.id, phone_number="+977-9841234570", is_active=True)
+        # Admin/IT: user/device/config admin, walled off from financial data.
+        admin_it = User(staff_id="IT-001", name="Bikash Shah (IT Admin)", name_ne="विकास शाह",
+                        role="admin", hashed_pin=hash_pin("1234"), branch_id=None,
+                        department=Department.ADMIN_IT.value, data_scope=DataScope.ORG.value,
+                        permission_set=PermissionSet.ADMIN.value,
+                        org_unit_id=ho.id, phone_number="+977-9841234571", is_active=True)
+        # Head Office: org-wide operational + strategic; launches feedback campaigns.
+        head_office = User(staff_id="HO-001", name="Nirmala Gautam (Head Office)", name_ne="निर्मला गौतम",
+                           role="admin", hashed_pin=hash_pin("1234"), branch_id=None,
+                           department=Department.HEAD_OFFICE.value, data_scope=DataScope.ORG.value,
+                           permission_set=f"{PermissionSet.READ.value},{PermissionSet.WRITE.value}",
+                           org_unit_id=ho.id, phone_number="+977-9841234572", is_active=True)
+        s.add_all([monitor, admin_it, head_office])
         await s.flush()
 
         n_loans = 0
@@ -174,6 +231,7 @@ async def seed():
         await s.commit()
         logger.info("Demo seed complete.")
         logger.info(f"  Branch: Kathmandu Main | Officers: FO-208, FO-209 (PIN 1234) | Manager: BM-001 (PIN 1234)")
+        logger.info(f"  Org tree: HO(000) -> branch(0042) -> 3 centers | Dept users: MON-001 (audit), IT-001 (admin_it), HO-001 (head_office) — all PIN 1234")
         logger.info(f"  Borrowers: {len(BORROWERS)} | Loans: {n_loans} | Today's tasks: {n_tasks}")
         logger.info(f"  Lifecycle: active+delinquent collecting, 2 pending applications, 1 approved awaiting disbursement")
 
