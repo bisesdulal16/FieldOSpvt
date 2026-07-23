@@ -149,6 +149,15 @@ export default function EndOfDayScreen() {
 
           // Submit EOD via service layer (local queue + audit), then show the
           // completion view in-place (replaces the form) rather than stacking.
+          // EOD ends the officer's day. The report submit is offline-first (queued
+          // locally), so the day must end whether or not the immediate network call
+          // succeeds — otherwise an offline/erroring submit leaves the day "started"
+          // and it restores on next login. End the day in a finally, not only on success.
+          const endDay = async () => {
+            try { await setSetting('eod_submitted_date', new Date().toISOString().split('T')[0], 'string'); } catch {}
+            try { await useFieldOSStore.getState().resetDay(); } catch {}
+            setSubmitted(true);
+          };
           submitEndOfDayReport({
             reportDate: new Date().toISOString().split('T')[0],
             totalCollections: stats.collected,
@@ -157,16 +166,7 @@ export default function EndOfDayScreen() {
             exceptions: [],
             isConfirmed: confirmed,
             faceVerified: false,
-          }).then(async () => {
-            try { await setSetting('eod_submitted_date', new Date().toISOString().split('T')[0], 'string'); } catch {}
-            // EOD ends the officer's day: clear day-start so it doesn't restore on
-            // next login and the officer isn't shown as "day started" after EOD.
-            try {
-              await setSetting('day_started', 'false', 'boolean');
-              useFieldOSStore.getState().resetDay();
-            } catch {}
-            setSubmitted(true);
-          }).catch(() => { setSubmitted(true); });
+          }).then(endDay).catch(endDay);
         }} icon="shield">{t('submitMyReport')}</PrimaryButton>
         <View style={styles.actionRow}>
           <SecondaryButton onPress={() => router.back()} icon="save">{t('draft')}</SecondaryButton>

@@ -43,6 +43,10 @@ def _ts() -> int:
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:latest")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "20"))
+# On this host the GPU (GTX 1650, 4GB) is mostly consumed by another process, so any
+# GPU offload makes the llama runner OOM-crash (exit 2). Force CPU-only by default —
+# gemma2:2b answers in ~12s warm on CPU. Set OLLAMA_NUM_GPU>0 if a GPU frees up.
+OLLAMA_NUM_GPU = int(os.getenv("OLLAMA_NUM_GPU", "0"))
 
 
 def _ollama_generate(prompt: str, system: str | None = None) -> str | None:
@@ -54,7 +58,7 @@ def _ollama_generate(prompt: str, system: str | None = None) -> str | None:
             "system": system or "",
             "stream": False,
             "keep_alive": "30m",  # keep the model resident between requests
-            "options": {"temperature": 0.2},
+            "options": {"temperature": 0.2, "num_gpu": OLLAMA_NUM_GPU},
         }
         req = urllib.request.Request(
             f"{OLLAMA_URL}/api/generate",

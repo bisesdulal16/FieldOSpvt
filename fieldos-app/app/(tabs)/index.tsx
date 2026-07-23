@@ -29,6 +29,7 @@ const FACE_CLOCKIN_ENABLED = process.env.EXPO_PUBLIC_FACE_CLOCKIN === 'true';
 import { getActivePromises } from '../../db/repositories/promiseToPayRepo';
 import { getTotalCollectedToday } from '../../db/repositories/collectionsRepo';
 import { query } from '../../db/database';
+import { getSetting, setSetting } from '../../db/repositories/settingsRepo';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -46,6 +47,25 @@ export default function DashboardScreen() {
   const totalUnsynced = syncItemsReady + syncFailedCount;
   const [startingDay, setStartingDay] = useState(false);
   const [showFaceScan, setShowFaceScan] = useState(false);
+
+  // Live "time on shift" clock — ticks while the day is active so the officer can
+  // see how long they've been working and there's a clear day boundary to end.
+  const [elapsed, setElapsed] = useState('');
+  useEffect(() => {
+    if (!dayStarted) { setElapsed(''); return; }
+    let active = true;
+    const tick = async () => {
+      const iso = await getSetting('day_started_at');
+      if (!active || !iso) return;
+      const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      setElapsed(h > 0 ? `${h}h ${m}m` : `${m}m`);
+    };
+    tick();
+    const id = setInterval(tick, 60_000); // once a minute is enough for h/m display
+    return () => { active = false; clearInterval(id); };
+  }, [dayStarted]);
 
   // Finish start-of-day: capture a selfie for the manager (only when face-match
   // didn't run), then the server checks the officer is on the branch office
@@ -205,6 +225,26 @@ export default function DashboardScreen() {
     }
   }, [dayStarted, fetchAIData]);
 
+  // First-run face enrollment: if this officer has never enrolled a reference face,
+  // offer it once (with Skip — never hard-blocks the golden path). Without an enrolled
+  // template, clock-in has nothing to match against and any face passes, so this is
+  // what makes the face feature real. Covers every login path since Home always mounts.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (await getSetting('face_enroll_prompted') === 'true') return;
+        if (cancelled || await isEnrolled()) return; // already enrolled
+        await setSetting('face_enroll_prompted', 'true', 'boolean');
+        Alert.alert(t('faceEnrollPromptTitle'), t('faceEnrollPromptMsg'), [
+          { text: t('faceEnrollLater'), style: 'cancel' },
+          { text: t('faceEnrollNow'), onPress: () => router.push('/face-enroll') },
+        ]);
+      } catch { /* enrollment is best-effort — never block Home */ }
+    })();
+    return () => { cancelled = true; };
+  }, [t, router]);
+
   const quickActions = [
     { label: t('dueList'), icon: 'list-outline' as const, screen: '/tasks' as const },
     { label: t('recordCollection'), icon: 'wallet-outline' as const, screen: '/(tabs)/collect' as const },
@@ -277,7 +317,9 @@ export default function DashboardScreen() {
           {dayStarted && (
             <View style={styles.dayStartedRow}>
               <Ionicons name="checkmark-circle" size={10} color={colors.green} />
-              <Text style={styles.dayStartedText}>{t('dayStarted')} · {dayVerifiedAt}</Text>
+              <Text style={styles.dayStartedText}>
+                {t('dayStarted')} · {dayVerifiedAt}{elapsed ? ` · ${elapsed} ${t('onShift')}` : ''}
+              </Text>
             </View>
           )}
         </View>
@@ -501,19 +543,21 @@ export default function DashboardScreen() {
 
             <TouchableOpacity
               onPress={() => router.push('/end-of-day')}
-              style={styles.eodCard}
+              style={styles.endDayCard}
               activeOpacity={0.9}
             >
               <View style={styles.eodLeft}>
-                <View style={styles.eodIcon}>
-                  <Ionicons name="list-outline" size={16} color={colors.navy} />
+                <View style={styles.endDayIcon}>
+                  <Ionicons name="power" size={16} color={colors.white} />
                 </View>
                 <View>
-                  <Text style={styles.eodTitle}>{t('endOfDaySummary')}</Text>
-                  <Text style={styles.eodDesc}>{t('reviewProgress')}</Text>
+                  <Text style={styles.endDayTitle}>{t('endDayBtn')}</Text>
+                  <Text style={styles.endDayDesc}>
+                    {t('reviewProgress')}{elapsed ? ` · ${elapsed} ${t('onShift')}` : ''}
+                  </Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.gray400} />
+              <Ionicons name="chevron-forward" size={16} color={colors.white} />
             </TouchableOpacity>
           </>
         )}
@@ -582,6 +626,11 @@ const styles = StyleSheet.create({
   eodIcon: { width: 32, height: 32, borderRadius: borderRadius.sm, backgroundColor: `${colors.navy}15`, alignItems: 'center', justifyContent: 'center' },
   eodTitle: { fontSize: fontSize.base, fontWeight: '600', color: colors.gray700 },
   eodDesc: { fontSize: fontSize.xs, color: colors.gray400 },
+  // Clear "End Day" action — navy card so it reads as the deliberate end-of-shift boundary.
+  endDayCard: { backgroundColor: colors.navy, borderRadius: borderRadius.lg, padding: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  endDayIcon: { width: 32, height: 32, borderRadius: borderRadius.sm, backgroundColor: `${colors.white}22`, alignItems: 'center', justifyContent: 'center' },
+  endDayTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.white },
+  endDayDesc: { fontSize: fontSize.xs, color: `${colors.white}CC` },
   aiLoadingCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: borderRadius.lg, backgroundColor: colors.navyBg },
   aiLoadingText: { fontSize: fontSize.sm, color: colors.navy },
   aiBanner: { borderRadius: borderRadius.lg, padding: spacing.md, backgroundColor: colors.navyBg, borderWidth: 1, borderColor: `${colors.navy}20` },

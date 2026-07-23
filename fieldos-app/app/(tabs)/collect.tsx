@@ -70,6 +70,14 @@ export default function RecordCollectionScreen() {
     } catch { setGpsStatus('denied'); }
   }, []);
 
+  // Capture GPS whenever we have a selected client, no matter how the officer got
+  // here. Previously captureGps only ran from pickClient (the in-tab picker), so
+  // arriving from a task / client-detail — the normal golden path — recorded the
+  // collection with NO location and never even prompted for permission.
+  useEffect(() => {
+    if (selectedClient && gpsStatus === 'idle') captureGps();
+  }, [selectedClient, gpsStatus, captureGps]);
+
   const pickClient = (c: any) => {
     const due = Number(c.due_amount ?? c.dueAmount ?? 0);
     setSelectedClient({
@@ -273,6 +281,25 @@ export default function RecordCollectionScreen() {
               <Text style={styles.changeClientText}>{t('changeClient')}</Text>
             </TouchableOpacity>
           </View>
+          {/* Location capture status — visible so the anti-fraud GPS stamp isn't silent. */}
+          <TouchableOpacity
+            style={styles.gpsRow}
+            disabled={gpsStatus === 'capturing'}
+            onPress={() => { if (gpsStatus !== 'capturing') { setGpsStatus('idle'); } }}
+          >
+            <Ionicons
+              name={gpsStatus === 'done' ? 'location' : gpsStatus === 'denied' ? 'location-outline' : 'navigate-outline'}
+              size={14}
+              color={gpsStatus === 'done' ? colors.green : gpsStatus === 'denied' ? colors.red : colors.gray400}
+            />
+            <Text style={styles.gpsText}>
+              {gpsStatus === 'capturing' ? t('gpsCapturing')
+                : gpsStatus === 'done' ? (gps?.address || t('gpsCaptured'))
+                : gpsStatus === 'denied' ? t('gpsDeniedShort')
+                : t('gpsPending')}
+            </Text>
+            {gpsStatus === 'capturing' && <ActivityIndicator size="small" color={colors.gray400} />}
+          </TouchableOpacity>
           <View style={styles.amountRow}>
             <Text style={styles.amountLabel}>{t('dueAmount')}</Text>
             <Text style={styles.dueAmount}>NPR {dueAmount.toLocaleString()}</Text>
@@ -383,6 +410,8 @@ const styles = StyleSheet.create({
   clientId: { fontSize: fontSize.sm, color: colors.gray500 },
   changeClientBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: spacing.sm, borderRadius: borderRadius.sm, backgroundColor: colors.navyBg },
   changeClientText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.navy },
+  gpsRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm },
+  gpsText: { flex: 1, fontSize: fontSize.xs, color: colors.gray600 },
   amountRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.xs },
   amountLabel: { fontSize: fontSize.base, color: colors.gray500 },
   dueAmount: { fontSize: fontSize.lg, fontWeight: 'bold', color: colors.red },

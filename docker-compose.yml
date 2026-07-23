@@ -62,9 +62,14 @@ services:
       # On-prem AI (used when the 'ai' profile is up; graceful heuristic/typed fallback otherwise)
       WHISPER_URL: ${WHISPER_URL:-http://whisper:8000/v1/audio/transcriptions}
       WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
-      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma2:2b}
+      OLLAMA_NUM_GPU: ${OLLAMA_NUM_GPU:-0}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-45}
       SENTRY_DSN: ${SENTRY_DSN:-}
+    # Reach the host's Ollama (running on the Proxmox host, not a container).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     depends_on:

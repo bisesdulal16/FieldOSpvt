@@ -44,7 +44,7 @@ interface FieldOSState {
   dayVerifiedAt: string | null;
   currentStaffId: string | null;
   startDay: () => Promise<void>;
-  resetDay: () => void;
+  resetDay: () => Promise<void>;
   // Restore this officer's day-start for today (survives re-login until EOD).
   restoreDayForOfficer: (staffId: string) => Promise<void>;
 
@@ -134,6 +134,8 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
     await setSetting('day_started', 'true', 'boolean');
     await setSetting('day_started_at', now.toISOString(), 'string');
     if (staffId) await setSetting('day_started_staff', staffId, 'string');
+    // Clear any prior EOD-ended marker so starting a fresh day isn't blocked by the guard.
+    try { await setSetting('eod_ended_at', '', 'string'); await setSetting('eod_ended_staff', '', 'string'); } catch { /* silent */ }
     // Audit log — start day
     await auditStartDay(timeStr);
     // Legacy audit (for backward compat) — attribute to the real officer, not a hardcoded id
@@ -146,8 +148,16 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
     } catch { /* silent */ }
   },
 
-  resetDay: () => {
+  resetDay: async () => {
     set({ dayStarted: false, dayVerifiedAt: null });
+    // Durably end the day so it can't restore on re-login/offline reopen.
+    // (restoreDayForOfficer + hydrateFromDb both gate on day_started === 'true'.)
+    try {
+      await setSetting('day_started', 'false', 'boolean');
+      const staffId = get().currentStaffId;
+      if (staffId) await setSetting('eod_ended_staff', staffId, 'string');
+      await setSetting('eod_ended_at', new Date().toISOString(), 'string');
+    } catch { /* silent — in-memory state already cleared */ }
   },
 
   restoreDayForOfficer: async (staffId: string) => {
@@ -157,18 +167,22 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
       const started = await getSetting('day_started');
       const startedStaff = await getSetting('day_started_staff');
       const startedAt = await getSetting('day_started_at');
-      if (started === 'true' && startedStaff === staffId && startedAt) {
-        const d = new Date(startedAt);
-        const today = new Date();
-        const sameDay =
-          d.getFullYear() === today.getFullYear() &&
-          d.getMonth() === today.getMonth() &&
-          d.getDate() === today.getDate();
-        if (sameDay) {
-          const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-          set({ dayStarted: true, dayVerifiedAt: timeStr });
-          return;
-        }
+      const sameDayAs = (iso: string | null) => {
+        if (!iso) return false;
+        const d = new Date(iso);
+        const now = new Date();
+        return d.getFullYear() === now.getFullYear() &&
+          d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+      };
+      // If this officer already ended their day today, never restore it — even if a
+      // stale day_started flag lingers (guards the EOD "day won't end" bug).
+      const eodStaff = await getSetting('eod_ended_staff');
+      const eodAt = await getSetting('eod_ended_at');
+      const endedToday = eodStaff === staffId && sameDayAs(eodAt);
+      if (!endedToday && started === 'true' && startedStaff === staffId && startedAt && sameDayAs(startedAt)) {
+        const timeStr = new Date(startedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        set({ dayStarted: true, dayVerifiedAt: timeStr });
+        return;
       }
       // No active day for THIS officer today → they must start their day.
       set({ dayStarted: false, dayVerifiedAt: null });
@@ -374,15 +388,20 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
           // Check if it's the same day
           const startedDate = new Date(dayStartedAt);
           const today = new Date();
-          if (
+          const sameDay =
             startedDate.getFullYear() === today.getFullYear() &&
             startedDate.getMonth() === today.getMonth() &&
-            startedDate.getDate() === today.getDate()
-          ) {
+            startedDate.getDate() === today.getDate();
+          // Don't restore a day the officer already ended via EOD today.
+          const eodAt = await getSetting('eod_ended_at');
+          const endedToday = eodAt
+            ? (() => { const e = new Date(eodAt); return e.getFullYear() === today.getFullYear() && e.getMonth() === today.getMonth() && e.getDate() === today.getDate(); })()
+            : false;
+          if (sameDay && !endedToday) {
             const timeStr = startedDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
             set({ dayStarted: true, dayVerifiedAt: timeStr });
           } else {
-            // New day — reset
+            // New day, or day already ended → reset
             await setSetting('day_started', 'false', 'boolean');
           }
         }
