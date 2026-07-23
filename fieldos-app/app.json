@@ -27,7 +27,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0B1B3A"
       },
-      "package": "np.fieldos.pilot",
+      "package": "np.fieldos.app",
       "permissions": [
         "CAMERA",
         "ACCESS_FINE_LOCATION",
@@ -87,9 +87,9 @@
     "scheme": "fieldos-nepal",
     "extra": {
       "eas": {
-        "projectId": "5d2fcdae-d167-40ae-8ab1-e6beaefeab22"
+        "projectId": "24b312d2-0f5c-4d91-bf67-e3c7a34ff221"
       }
     },
-    "owner": "fieldosnepal"
+    "owner": "bisesdulal16"
   }
 }
