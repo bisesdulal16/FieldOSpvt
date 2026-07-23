@@ -719,6 +719,31 @@ const ne = {
   voiceRecordError: 'अडियो रेकर्ड गर्न सकिएन। फेरि प्रयास गर्नुहोस्।',
   voiceTranscribeEmptyTitle: 'लिपिबद्ध भएन',
   voiceTranscribeEmptyMsg: 'अडियो लिपिबद्ध गर्न सकिएन — कृपया आफ्नो नोट टाइप गर्नुहोस्।',
+
+  // ─── Feedback (hierarchical feedback loop) ───────────────────
+  giveFeedback: 'प्रतिक्रिया दिनुहोस्',
+  profileFeedbackRow: 'प्रतिक्रिया दिनुहोस्',
+  profileFeedbackDesc: 'कार्यालयलाई भन्नुहोस् केले ढिला बनाइरहेको छ',
+  fbAnonymousNote: 'तपाईंको शाखा प्रबन्धकले यसमा तपाईंको नाम देख्नुहुनेछैन।',
+  fbAnonymousChip: 'गुमनाम रूपमा पठाइयो',
+  fbCampaignFromOffice: 'कार्यालयबाट प्रश्न',
+  fbTapToAnswer: 'जवाफ दिन ट्याप गर्नुहोस्',
+  fbAnsweringThis: 'तपाईं यसको जवाफ दिँदै हुनुहुन्छ — तल विवरण थप्नुहोस्',
+  fbWhatsUp: 'यो केको बारेमा हो?',
+  fbHowMuch: 'यो कति महत्त्वपूर्ण छ?',
+  fbMinor: 'सामान्य',
+  fbModerate: 'मध्यम',
+  fbSerious: 'गम्भीर',
+  fbTellUsMore: 'थप बताउनुहोस्',
+  fbPlaceholder: 'के भयो, वा केले मद्दत गर्छ?',
+  fbSubmit: 'प्रतिक्रिया पठाउनुहोस्',
+  fbPickCategory: 'कृपया यो केको बारेमा हो छान्नुहोस्।',
+  fbEnterText: 'कृपया केही शब्द थप्नुहोस् ताकि हामी बुझ्न सकौं।',
+  fbSubmitFailed: 'पठाउन सकिएन — कृपया फेरि प्रयास गर्नुहोस्।',
+  fbThanks: 'धन्यवाद!',
+  fbThanksDesc: 'तपाईंको प्रतिक्रिया सिधै कार्यालयमा पुग्यो।',
+  fbDone: 'भयो',
+  fbGiveAnother: 'थप प्रतिक्रिया दिनुहोस्',
 } as const;
 
 export default ne;

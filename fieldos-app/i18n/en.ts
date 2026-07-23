@@ -719,6 +719,31 @@ const en = {
   voiceRecordError: 'Could not record audio. Please try again.',
   voiceTranscribeEmptyTitle: 'No transcription',
   voiceTranscribeEmptyMsg: 'Couldn’t transcribe the audio — please type your note.',
+
+  // ─── Feedback (hierarchical feedback loop) ───────────────────
+  giveFeedback: 'Give Feedback',
+  profileFeedbackRow: 'Give Feedback',
+  profileFeedbackDesc: 'Tell the office what’s slowing you down',
+  fbAnonymousNote: 'Your branch manager won’t see your name on this.',
+  fbAnonymousChip: 'Sent anonymously',
+  fbCampaignFromOffice: 'Question from the office',
+  fbTapToAnswer: 'Tap to answer this',
+  fbAnsweringThis: 'You’re answering this — add details below',
+  fbWhatsUp: 'What’s this about?',
+  fbHowMuch: 'How much does it matter?',
+  fbMinor: 'Minor',
+  fbModerate: 'Moderate',
+  fbSerious: 'Serious',
+  fbTellUsMore: 'Tell us more',
+  fbPlaceholder: 'What happened, or what would help?',
+  fbSubmit: 'Send Feedback',
+  fbPickCategory: 'Please pick what this is about.',
+  fbEnterText: 'Please add a few words so we understand.',
+  fbSubmitFailed: 'Couldn’t send — please try again.',
+  fbThanks: 'Thank you!',
+  fbThanksDesc: 'Your feedback went straight to the office.',
+  fbDone: 'Done',
+  fbGiveAnother: 'Give more feedback',
 } as const;
 
 export default en;

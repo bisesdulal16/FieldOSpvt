@@ -75,6 +75,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { useManagerAPI, apiLogin, useAutoRefresh, useCBSAPI, useSecurityAPI, usePilotAPI, apiMutation, useBranding } from '@/lib/useManagerAPI';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -90,6 +91,9 @@ type ViewId =
   | 'eod'
   | 'sync'
   | 'audit'
+  | 'feedback-inbox'
+  | 'feedback-rollup'
+  | 'feedback-campaigns'
   | 'cbs-clients'
   | 'cbs-par'
   | 'reconciliation'
@@ -161,6 +165,13 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'announcements', label: 'Announcements', icon: <Bell className="h-5 w-5" /> },
 ];
 
+// The pilot STAR — visible in pilot mode (not gated behind !PILOT_MODE).
+const FEEDBACK_NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
+  { id: 'feedback-inbox', label: 'Feedback Inbox', icon: <MessageSquare className="h-5 w-5" /> },
+  { id: 'feedback-rollup', label: 'Feedback Rollup', icon: <BarChart3 className="h-5 w-5" /> },
+  { id: 'feedback-campaigns', label: 'Feedback Campaigns', icon: <Send className="h-5 w-5" /> },
+];
+
 const CBS_NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'cbs-clients', label: 'CBS Client Data', icon: <Database className="h-5 w-5" /> },
   { id: 'cbs-par', label: 'CBS PAR Status', icon: <TrendingDown className="h-5 w-5" /> },
@@ -203,7 +214,7 @@ const PILOT_NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = 
   // { id: 'pilot-agreements', label: 'Agreements', icon: <ClipboardList className="h-5 w-5" /> },
 ];
 
-const ALL_NAV_ITEMS = [...NAV_ITEMS, ...AI_NAV_ITEMS, ...CBS_NAV_ITEMS, ...SECURITY_NAV_ITEMS, ...PILOT_NAV_ITEMS];
+const ALL_NAV_ITEMS = [...NAV_ITEMS, ...FEEDBACK_NAV_ITEMS, ...AI_NAV_ITEMS, ...CBS_NAV_ITEMS, ...SECURITY_NAV_ITEMS, ...PILOT_NAV_ITEMS];
 
 // Views whose content is static reference/demo material, not live-measured data. A banner
 // makes that explicit so a technical reviewer is never misled into thinking these are live.
@@ -1412,6 +1423,414 @@ function ExceptionsView({ enabled }: { enabled: boolean }) {
           emptyMessage="No exceptions — everything looks good!"
         />
       </ScrollArea>
+    </div>
+  );
+}
+
+// ---------- Feedback: shared bits ----------
+const FEEDBACK_CATEGORY_STYLE: Record<string, string> = {
+  bug: 'bg-red-100 text-red-700',
+  time_sink: 'bg-orange-100 text-orange-700',
+  request: 'bg-blue-100 text-blue-700',
+  praise: 'bg-green-100 text-green-700',
+  blocker: 'bg-red-100 text-red-700',
+};
+
+const FEEDBACK_STATUS_STYLE: Record<string, string> = {
+  open: 'bg-red-100 text-red-700',
+  ack: 'bg-amber-100 text-amber-700',
+  in_review: 'bg-blue-100 text-blue-700',
+  resolved: 'bg-green-100 text-green-700',
+  wont_fix: 'bg-gray-100 text-gray-500',
+};
+
+function FeedbackPill({ value, styles }: { value: string; styles: Record<string, string> }) {
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${styles[value] || 'bg-gray-100 text-gray-600'}`}>
+      {value.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+/** Shown when the backend returns 403 for a department-gated view (audit/HO only). */
+function DeptGate({ what }: { what: string }) {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <div className="flex flex-col items-center gap-3 text-center max-w-md">
+        <Shield className="h-10 w-10 text-gray-300" />
+        <p className="text-sm text-gray-600 font-medium">{what} is limited to Head Office / Monitoring</p>
+        <p className="text-xs text-gray-500">
+          This view rolls up feedback across the whole organization, so it&apos;s only
+          available to Audit/Monitoring and Head Office accounts.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Feedback Inbox (triage) ----------
+function FeedbackInboxView({ enabled }: { enabled: boolean }) {
+  const { data, loading, error, refetch } = useManagerAPI<any>('feedback', enabled);
+  const [busyId, setBusyId] = React.useState<number | null>(null);
+  const [commentFor, setCommentFor] = React.useState<number | null>(null);
+  const [commentText, setCommentText] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState<string>('all');
+
+  if (loading) return <LoadingSkeleton />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+
+  const items: any[] = Array.isArray(data?.items) ? data.items : [];
+  const filtered = statusFilter === 'all' ? items : items.filter((f) => f.status === statusFilter);
+
+  const openCount = items.filter((f) => f.status === 'open').length;
+  const timeSinkCount = items.filter((f) => f.category === 'time_sink').length;
+
+  async function act(id: number, action: string, body?: unknown) {
+    setBusyId(id);
+    const res = await apiMutation(`feedback/${id}/${action}`, 'POST', body);
+    setBusyId(null);
+    if (!res.success) {
+      alert(res.error || 'Action failed');
+      return;
+    }
+    if (action === 'comment') {
+      setCommentFor(null);
+      setCommentText('');
+    }
+    refetch();
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Feedback Inbox</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Field feedback you can triage. Authors are hidden from branch managers by design —
+            escalate up the chain when it needs a wider decision.
+          </p>
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white"
+        >
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="ack">Acknowledged</option>
+          <option value="in_review">In review</option>
+          <option value="resolved">Resolved</option>
+          <option value="wont_fix">Won&apos;t fix</option>
+        </select>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-gray-800">{items.length}</p>
+            <p className="text-xs text-gray-500 mt-1">Total visible</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-red-600">{openCount}</p>
+            <p className="text-xs text-gray-500 mt-1">Open</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-orange-600">{timeSinkCount}</p>
+            <p className="text-xs text-gray-500 mt-1">Time-sinks</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-gray-200 py-16 text-center text-sm text-gray-400">
+          No feedback here yet.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((f) => (
+            <Card key={f.id} className="rounded-xl shadow-sm border-gray-200">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <FeedbackPill value={f.category} styles={FEEDBACK_CATEGORY_STYLE} />
+                  <FeedbackPill value={f.status} styles={FEEDBACK_STATUS_STYLE} />
+                  <span className="text-xs text-gray-400">severity {f.severity}/5</span>
+                  {f.subject_ref && (
+                    <span className="text-xs text-gray-500">· re: {f.subject_ref}</span>
+                  )}
+                  <span className="text-xs text-gray-400 ml-auto">
+                    {f.anonymous ? 'Anonymous' : (f.author_name || `user #${f.author_user_id}`)}
+                    {' · '}{formatTime(f.submitted_at)}
+                  </span>
+                </div>
+
+                <p className="text-sm text-gray-700">{f.body_text || <span className="text-gray-400 italic">(voice note only)</span>}</p>
+
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  <Button variant="outline" size="sm" disabled={busyId === f.id || f.status !== 'open'}
+                    onClick={() => act(f.id, 'ack')}>
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Acknowledge
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={busyId === f.id}
+                    onClick={() => setCommentFor(commentFor === f.id ? null : f.id)}>
+                    <MessageSquare className="h-3.5 w-3.5 mr-1" /> Comment
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={busyId === f.id}
+                    onClick={() => act(f.id, 'escalate')}>
+                    <ArrowUpRight className="h-3.5 w-3.5 mr-1" /> Escalate
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={busyId === f.id || f.status === 'resolved'}
+                    onClick={() => act(f.id, 'status', { status: 'resolved' })}>
+                    Resolve
+                  </Button>
+                </div>
+
+                {commentFor === f.id && (
+                  <div className="flex items-end gap-2 pt-1">
+                    <Textarea value={commentText} onChange={(e) => setCommentText(e.target.value)}
+                      placeholder="Add a comment for the record…" className="text-sm min-h-[60px]" />
+                    <Button size="sm" disabled={busyId === f.id || !commentText.trim()}
+                      onClick={() => act(f.id, 'comment', { note: commentText.trim() })}>
+                      Save
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Feedback Aggregate (HO / Monitoring rollup) ----------
+function FeedbackAggregateView({ enabled }: { enabled: boolean }) {
+  const { data, loading, error, refetch } = useManagerAPI<any>('feedback/aggregate', enabled);
+  if (loading) return <LoadingSkeleton />;
+  // Department-gated on the backend — a 403 surfaces here as an API error string.
+  if (error && error.includes('403')) return <DeptGate what="The feedback rollup" />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+  if (!data) return <ErrorState message="No aggregate data" onRetry={refetch} />;
+
+  const byCategory: any[] = Array.isArray(data.by_category) ? data.by_category : [];
+  const byBranch: any[] = Array.isArray(data.by_branch) ? data.by_branch : [];
+  const byAge = data.by_age || {};
+  const unresolved = data.unresolved_by_age || {};
+  const ageOrder = ['0-2d', '3-7d', '8-30d', '30d+', 'unknown'];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-gray-800">Feedback Rollup</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Organization-wide signal across every position — the view that turns field friction
+          into a decision.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-gray-800">{data.total ?? 0}</p>
+            <p className="text-xs text-gray-500 mt-1">Total feedback</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl shadow-sm border-orange-200 bg-orange-50/40">
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-orange-600">{data.time_sink_count ?? 0}</p>
+            <p className="text-xs text-gray-500 mt-1">Time-sinks flagged</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-red-600">
+              {(unresolved['30d+'] || 0)}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Unresolved &gt; 30 days</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-gray-800">{byBranch.length}</p>
+            <p className="text-xs text-gray-500 mt-1">Branches reporting</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardHeader><CardTitle className="text-sm font-semibold text-gray-700">By category</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {byCategory.length === 0 && <p className="text-xs text-gray-400">No data yet.</p>}
+            {byCategory.map((c) => (
+              <div key={c.category} className="flex items-center justify-between">
+                <FeedbackPill value={c.category} styles={FEEDBACK_CATEGORY_STYLE} />
+                <span className="text-sm font-medium text-gray-700">{c.count}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardHeader><CardTitle className="text-sm font-semibold text-gray-700">Unresolved by age</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {ageOrder.map((k) => (
+              <div key={k} className="flex items-center justify-between text-sm">
+                <span className="text-gray-500">{k}</span>
+                <span className="text-gray-700">
+                  <span className="font-medium">{unresolved[k] || 0}</span>
+                  <span className="text-gray-400"> / {byAge[k] || 0}</span>
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="rounded-xl shadow-sm border-gray-200">
+        <CardHeader><CardTitle className="text-sm font-semibold text-gray-700">By branch</CardTitle></CardHeader>
+        <CardContent>
+          <DashboardTable
+            headers={['Branch', 'Feedback count']}
+            rows={byBranch.map((b) => [
+              <span key="b" className="text-gray-700">{b.branch_id == null ? '— (no branch)' : `Branch #${b.branch_id}`}</span>,
+              <span key="c" className="text-gray-700 font-medium">{b.count}</span>,
+            ])}
+            emptyMessage="No branch data yet."
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ---------- Feedback Campaigns ----------
+function FeedbackCampaignsView({ enabled }: { enabled: boolean }) {
+  const { data, loading, error, refetch } = useManagerAPI<any>('feedback/campaigns', enabled);
+  const [showForm, setShowForm] = React.useState(false);
+  const [prompt, setPrompt] = React.useState('');
+  const [targetRole, setTargetRole] = React.useState('field_officer');
+  const [creating, setCreating] = React.useState(false);
+  const [createErr, setCreateErr] = React.useState<string | null>(null);
+
+  if (loading) return <LoadingSkeleton />;
+  if (error && !error.includes('403')) return <ErrorState message={error} onRetry={refetch} />;
+
+  const items: any[] = Array.isArray(data?.items) ? data.items : [];
+
+  async function create() {
+    setCreating(true);
+    setCreateErr(null);
+    const res = await apiMutation('feedback/campaigns', 'POST', {
+      prompt_text: prompt.trim(),
+      target_role: targetRole || null,
+    });
+    setCreating(false);
+    if (!res.success) {
+      // 403 → only Head Office can open a campaign.
+      setCreateErr(res.error?.includes('403') || res.error?.toLowerCase().includes('department')
+        ? 'Only a Head Office account can open a campaign.'
+        : (res.error || 'Failed to open campaign'));
+      return;
+    }
+    setPrompt('');
+    setShowForm(false);
+    refetch();
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Feedback Campaigns</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Ask a question down a level — &quot;which app wastes the most of your day?&quot; —
+            and watch answers roll up by position.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setShowForm(!showForm)}>
+          <Send className="h-4 w-4 mr-1.5" /> {showForm ? 'Cancel' : 'New Campaign'}
+        </Button>
+      </div>
+
+      {showForm && (
+        <Card className="rounded-xl shadow-sm border-gray-200">
+          <CardContent className="p-4 space-y-3">
+            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)}
+              placeholder="What do you want to ask? e.g. Which task takes the most of your day?"
+              className="text-sm min-h-[70px]" />
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="text-xs text-gray-500">Target level</label>
+              <select value={targetRole} onChange={(e) => setTargetRole(e.target.value)}
+                className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white">
+                <option value="field_officer">Field officers</option>
+                <option value="branch_manager">Branch managers</option>
+                <option value="area_manager">Area / monitoring</option>
+                <option value="">Everyone</option>
+              </select>
+              <Button size="sm" disabled={creating || !prompt.trim()} onClick={create}>
+                {creating ? 'Opening…' : 'Open campaign'}
+              </Button>
+            </div>
+            {createErr && <p className="text-xs text-red-600">{createErr}</p>}
+          </CardContent>
+        </Card>
+      )}
+
+      {items.length === 0 ? (
+        <div className="rounded-xl border border-gray-200 py-16 text-center text-sm text-gray-400">
+          No open campaigns. {`(As a non-HO account you'll only see campaigns aimed at your role.)`}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {items.map((c) => (
+            <Card key={c.id} className="rounded-xl shadow-sm border-gray-200">
+              <CardContent className="p-4 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{c.prompt_text}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Targets: {c.target_role ? c.target_role.replace(/_/g, ' ') : 'everyone'} · opened {formatTime(c.opened_at)}
+                  </p>
+                </div>
+                <CampaignResults campaignId={c.id} />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Inline results-by-role for one campaign (HO/Audit only; silent for others). */
+function CampaignResults({ campaignId }: { campaignId: number }) {
+  const [open, setOpen] = React.useState(false);
+  const { data, loading, error } = useManagerAPI<any>(`feedback/campaigns/${campaignId}/results`, open);
+
+  if (!open) {
+    return (
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <BarChart3 className="h-3.5 w-3.5 mr-1" /> Results
+      </Button>
+    );
+  }
+  if (loading) return <span className="text-xs text-gray-400">Loading…</span>;
+  if (error) return <span className="text-xs text-gray-400">{error.includes('403') ? 'HO only' : '—'}</span>;
+
+  const byRole: any[] = Array.isArray(data?.by_role) ? data.by_role : [];
+  return (
+    <div className="text-xs text-gray-600 min-w-[130px]">
+      <p className="font-medium text-gray-700 mb-1">{data?.total_answers ?? 0} answers</p>
+      {byRole.map((r) => (
+        <div key={r.role} className="flex justify-between">
+          <span className="text-gray-500">{r.role.replace(/_/g, ' ')}</span>
+          <span>{r.count}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -6070,6 +6489,12 @@ export default function DashboardPage() {
         return <SyncView enabled={activeView === 'sync'} />;
       case 'audit':
         return <AuditView enabled={activeView === 'audit'} />;
+      case 'feedback-inbox':
+        return <FeedbackInboxView enabled={activeView === 'feedback-inbox'} />;
+      case 'feedback-rollup':
+        return <FeedbackAggregateView enabled={activeView === 'feedback-rollup'} />;
+      case 'feedback-campaigns':
+        return <FeedbackCampaignsView enabled={activeView === 'feedback-campaigns'} />;
       case 'loan-approvals':
         return <LoanApprovalsView enabled={activeView === 'loan-approvals'} />;
       case 'receipts':
@@ -6226,6 +6651,34 @@ export default function DashboardPage() {
                 </button>
               );
             })}
+
+            {/* Feedback — the pilot star. Always visible (not gated behind !PILOT_MODE). */}
+            <div className="my-3 border-t border-white/10" />
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2 flex items-center gap-1.5">
+              <MessageSquare className="h-3 w-3 text-amber-400" /> Feedback
+            </p>
+            {FEEDBACK_NAV_ITEMS.map((item) => {
+              const isActive = activeView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setActiveView(item.id);
+                    setSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? 'bg-white/10 text-amber-400 font-medium'
+                      : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'
+                  }`}
+                >
+                  {item.icon}
+                  <span className="truncate">{item.label}</span>
+                  {isActive && <ChevronRight className="h-4 w-4 ml-auto text-amber-400/50" />}
+                </button>
+              );
+            })}
+
             {!PILOT_MODE && (<>
             <div className="my-3 border-t border-white/10" />
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-3 mb-2 flex items-center gap-1.5">

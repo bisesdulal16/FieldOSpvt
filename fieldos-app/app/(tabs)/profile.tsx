@@ -124,9 +124,12 @@ export default function ProfileScreen() {
 
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{t('support')}</Text></View>
-          <TouchableOpacity style={styles.supportRow} onPress={() => alert('Issue reporting feature coming soon.')}>
-            <View style={[styles.supportIcon, { backgroundColor: colors.orangeLight }]}><Ionicons name="alert-circle-outline" size={16} color={colors.orange} /></View>
-            <Text style={styles.supportLabel}>{t('reportAppIssue')}</Text>
+          <TouchableOpacity style={styles.supportRow} onPress={() => router.push('/give-feedback')}>
+            <View style={[styles.supportIcon, { backgroundColor: colors.orangeLight }]}><Ionicons name="chatbox-ellipses-outline" size={16} color={colors.orange} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.supportLabel}>{t('profileFeedbackRow')}</Text>
+              <Text style={styles.securityDesc}>{t('profileFeedbackDesc')}</Text>
+            </View>
             <Ionicons name="chevron-forward" size={14} color={colors.gray300} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.supportRow} onPress={() => alert('Contact feature coming soon.')}>
