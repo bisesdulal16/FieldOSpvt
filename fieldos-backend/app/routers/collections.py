@@ -13,11 +13,12 @@ from app.schemas.common import ApiResponse
 from app.services import auth_service
 from app.services.audit_helper import write_audit
 from app.services.sms_service import record_and_send_receipt
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 from app.utils.nepal_time import to_nepal_iso
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/collections", tags=["Collections"])
+router = APIRouter(prefix="/collections", tags=["Collections"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 @router.post("/", response_model=ApiResponse)

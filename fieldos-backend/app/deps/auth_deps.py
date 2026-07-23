@@ -217,3 +217,24 @@ require_any_role = require_role(
     UserRole.AREA_MANAGER.value,
     UserRole.ADMIN.value,
 )
+
+
+# ---------------------------------------------------------------------------
+# Pre-built department dependencies (org matrix — PILOT_SCOPE_V2.md §2b / §8-C)
+# ---------------------------------------------------------------------------
+
+# The financial-data wall. `admin_it` administers users/devices/config but must
+# NOT read or write financial/client data (a system admin must not be able to
+# silently read collections or alter a loan — this is itself part of the audit
+# story). Attach this at the router level on every money/client-PII router so
+# the boundary is enforced in PERMISSIONS, not merely hidden in the UI.
+#   operations   → field/branch (write the money loop)
+#   audit        → monitoring (read across all branches, flag)
+#   head_office  → org-wide operational + strategic
+# Everyone EXCEPT admin_it. Older users default to `operations` (A2 backfill),
+# so this is safe on pre-migration accounts.
+require_financial_access = require_department(
+    Department.OPERATIONS.value,
+    Department.AUDIT.value,
+    Department.HEAD_OFFICE.value,
+)

@@ -9,11 +9,12 @@ from app.models.task import TaskAssignment
 from app.models.client import Client
 from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedResponse
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 from app.utils.nepal_time import today_nepal_str
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/tasks", tags=["Tasks"])
+router = APIRouter(prefix="/tasks", tags=["Tasks"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 def _task_to_dict(task: TaskAssignment, client: Client | None = None) -> dict:

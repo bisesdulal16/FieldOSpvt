@@ -14,7 +14,7 @@ from sqlalchemy import select, func, and_, or_, outerjoin, case
 from sqlalchemy.orm import aliased
 
 from app.database import get_db
-from app.deps.auth_deps import require_manager_or_admin
+from app.deps.auth_deps import require_manager_or_admin, require_financial_access
 from app.utils.nepal_time import today_nepal_str, days_ago_nepal_str
 from app.models.user import User, UserRole
 from app.models.client import Client
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/manager",
     tags=["Manager Dashboard"],
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_manager_or_admin), Depends(require_financial_access)],
 )
 
 

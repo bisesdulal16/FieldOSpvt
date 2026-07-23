@@ -12,13 +12,14 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedResponse
 from app.schemas.loan import BorrowerCreate
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/clients",
     tags=["Clients"],
-    dependencies=[Depends(get_current_user)],  # all client data requires a valid token
+    # all client data requires a valid token AND financial-data access (walls off admin_it)
+    dependencies=[Depends(require_financial_access)],
 )
 
 

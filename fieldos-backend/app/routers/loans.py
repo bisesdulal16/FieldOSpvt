@@ -21,11 +21,12 @@ from app.models.user import User
 from app.schemas.loan import LoanApplicationCreate, LoanDisburseRequest, LoanResponse
 from app.schemas.common import ApiResponse
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user, require_manager_or_admin
+from app.deps.auth_deps import get_current_user, require_manager_or_admin, require_financial_access
 from app.utils.nepal_time import now_nepal, today_nepal_str
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/loans", tags=["Loans"])
+router = APIRouter(prefix="/loans", tags=["Loans"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 def _loan_dict(loan: LoanAccount) -> dict:

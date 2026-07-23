@@ -7,10 +7,11 @@ from app.models.center_meeting import CenterMeeting, MeetingAttendance
 from app.models.user import User
 from app.schemas.meeting import MeetingCreate
 from app.schemas.common import ApiResponse
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/meetings", tags=["Meetings"])
+router = APIRouter(prefix="/meetings", tags=["Meetings"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 @router.post("/", response_model=ApiResponse)
