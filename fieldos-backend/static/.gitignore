@@ -1,0 +1,4 @@
+# Don't commit large model binaries — upload to the server directly.
+*.tflite
+*.bin
+*.onnx
