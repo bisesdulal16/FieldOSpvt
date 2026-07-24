@@ -77,6 +77,8 @@ function mapEventToPayload(event: SyncQueueEvent): LocalSyncPayload {
     faceVerified: 'face_verified',
     gpsLatitude: 'gps_latitude',
     gpsLongitude: 'gps_longitude',
+    gpsAccuracyMeters: 'gps_accuracy_meters',
+    gpsAddress: 'gps_address',
     dueAmount: 'due_amount',
     outstandingAfter: 'outstanding_after',
   };
@@ -230,12 +232,44 @@ async function collectionReceiptExists(receiptId: string): Promise<boolean> {
 }
 
 /**
+ * POST the sync batch, transparently refreshing the token and retrying once on a
+ * 401. The queue push uses a raw fetch (not apiClient.request), so it doesn't get
+ * request()'s built-in 401-refresh — without this, a stale in-memory token (e.g.
+ * after a logout/login) 401s forever and the queue never drains to zero.
+ */
+async function postSyncEvents(
+  apiUrl: string,
+  body: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const { getAccessToken, refreshAccessToken } = require('./apiClient');
+  const send = (token: string | null) =>
+    fetch(`${apiUrl}/sync/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body,
+      signal,
+    });
+
+  let response = await send(getAccessToken());
+  if (response.status === 401) {
+    console.warn('[Sync Real] 401 — refreshing token and retrying once');
+    const fresh = await refreshAccessToken();
+    if (fresh) {
+      response = await send(fresh);
+    }
+  }
+  return response;
+}
+
+/**
  * Real sync — sends events to the backend API.
  */
 async function runRealSync(events: SyncQueueEvent[]): Promise<SyncEventsResponse> {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-  const { getAccessToken } = require('./apiClient');
-  const token = getAccessToken();
 
 
   // Collect all pending events — do NOT filter out collections with local receipts
@@ -264,15 +298,11 @@ async function runRealSync(events: SyncQueueEvent[]): Promise<SyncEventsResponse
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
-    const response = await fetch(`${apiUrl}/sync/events`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ events: backendEvents }),
-      signal: controller.signal,
-    });
+    const response = await postSyncEvents(
+      apiUrl,
+      JSON.stringify({ events: backendEvents }),
+      controller.signal,
+    );
     clearTimeout(timeoutId);
 
     const responseText = await response.text();

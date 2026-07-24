@@ -123,3 +123,7 @@ export {
   QUICK_ACTIONS,
 } from './aiAssistantService';
 export type { ChatMessage, FieldOSContext, QuickAction } from './aiAssistantService';
+
+// Feedback (hierarchical feedback loop — officer submit + campaign answer)
+export { submitFeedback, fetchOpenCampaigns } from './feedbackService';
+export type { SubmitFeedbackRequest, OpenCampaign, FeedbackCategory } from './feedbackService';

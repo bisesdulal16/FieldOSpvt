@@ -21,7 +21,7 @@ export default function DigitalReceiptScreen() {
   const [hasPendingSync, setHasPendingSync] = useState(true);
   const [cbsVerified, setCbsVerified] = useState(false);
   const [officerName, setOfficerName] = useState('');
-  const client = selectedClient || { id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
+  const client = selectedClient || { id: '', name: '', memberId: '' };
   const receiptId = storeReceiptId || `RC-${Date.now().toString(36).toUpperCase().slice(-8)}`;
   const now = new Date();
   const displayAmount = lastReceiptAmount || parseInt(collectionAmount) || 0;

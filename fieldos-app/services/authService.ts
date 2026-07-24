@@ -5,7 +5,7 @@
  * When mock mode is enabled, returns mock data with simulated delays.
  */
 
-import { loadTokens, setTokens, clearTokens, getAccessToken, getConfig } from './apiClient';
+import { loadTokens, setTokens, clearTokens, getAccessToken, getConfig, endSessionInMemory } from './apiClient';
 import * as SecureStore from 'expo-secure-store';
 import type {
   LoginRequest,
@@ -239,12 +239,103 @@ export async function registerDevice(req: DeviceRegisterRequest): Promise<ApiRes
   return await response.json();
 }
 
+// ─── Offline resume PIN ──────────────────────────────────────────
+// A lightweight "is this really you?" check when the app resumes an existing
+// session offline (no network to re-auth against). The PIN lives in SecureStore,
+// which is hardware-encrypted at rest (Keychain / Keystore) — the same store that
+// already holds the far more powerful bearer token. It is cleared on logout.
+// (Upgrade path: replace with a salted SHA-256 via expo-crypto if desired.)
+const RESUME_PIN_KEY = 'fieldos_resume_pin';
+const RESUME_STAFF_KEY = 'fieldos_resume_staff';
+
+export async function setResumePin(staffId: string, pin: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(RESUME_PIN_KEY, pin);
+    await SecureStore.setItemAsync(RESUME_STAFF_KEY, staffId);
+  } catch { /* best effort — resume simply falls back to online login */ }
+}
+
+/** True when a resume PIN has been stored (i.e. offline resume can be gated). */
+export async function hasResumePin(): Promise<boolean> {
+  try { return !!(await SecureStore.getItemAsync(RESUME_PIN_KEY)); } catch { return false; }
+}
+
+/** Verify a PIN entered on the offline resume screen. */
+export async function verifyResumePin(pin: string): Promise<boolean> {
+  try {
+    const stored = await SecureStore.getItemAsync(RESUME_PIN_KEY);
+    return !!stored && stored === pin;
+  } catch { return false; }
+}
+
+async function clearResumePin(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(RESUME_PIN_KEY);
+    await SecureStore.deleteItemAsync(RESUME_STAFF_KEY);
+  } catch { /* silent */ }
+}
+
+// ─── Offline login (log back in with no network, after a logout) ─────
+// Officers sign out and later need back in while in the field with no signal.
+// On each online login we cache {staffId, pin, at}; within 24h (the token's life)
+// the PIN can be verified locally and the cached token reused — no server needed.
+const OFFLINE_LOGIN_KEY = 'fieldos_offline_login';
+const SIGNED_OUT_KEY = 'fieldos_signed_out';
+const OFFLINE_LOGIN_TTL_MS = 24 * 60 * 60 * 1000;
+
+export async function setOfflineLogin(staffId: string, pin: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(OFFLINE_LOGIN_KEY, JSON.stringify({ staffId, pin, at: Date.now() }));
+  } catch { /* best effort */ }
+}
+
+/** Validate a PIN offline and restore the cached session. Returns the user on success. */
+export async function offlineLogin(staffId: string, pin: string): Promise<{ ok: boolean; user?: UserProfile }> {
+  try {
+    const raw = await SecureStore.getItemAsync(OFFLINE_LOGIN_KEY);
+    if (!raw) return { ok: false };
+    const cred = JSON.parse(raw);
+    const fresh = cred.at && (Date.now() - cred.at) < OFFLINE_LOGIN_TTL_MS;
+    if (cred.staffId !== staffId || cred.pin !== pin || !fresh) return { ok: false };
+    await loadTokens(); // pull the persisted access token back into memory
+    if (!getAccessToken()) return { ok: false };
+    await clearSignedOut();
+    const user = await getCurrentUser();
+    return { ok: true, user: user || undefined };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export async function isSignedOut(): Promise<boolean> {
+  try { return (await SecureStore.getItemAsync(SIGNED_OUT_KEY)) === '1'; } catch { return false; }
+}
+export async function clearSignedOut(): Promise<void> {
+  try { await SecureStore.deleteItemAsync(SIGNED_OUT_KEY); } catch { /* silent */ }
+}
+
 /**
- * Logout — clear tokens, user profile, and local session.
+ * Logout — end the in-memory session and require a fresh login, but KEEP the
+ * encrypted offline-login credential + cached token so the officer can log back in
+ * OFFLINE within 24h (they may sign out in the field with no network). The resume
+ * PIN (for silent app-reopen) is cleared, so reopening lands on the login screen.
  */
 export async function logout(): Promise<void> {
+  endSessionInMemory();
+  await clearResumePin();
+  try { await SecureStore.setItemAsync(SIGNED_OUT_KEY, '1'); } catch { /* silent */ }
+  await mockDelay(200);
+}
+
+/** Full sign-out — wipe every credential (use when the device is lost/reassigned). */
+export async function logoutFull(): Promise<void> {
   clearTokens();
-  try { SecureStore.deleteItemAsync('fieldos_user_profile'); } catch {}
+  try {
+    await SecureStore.deleteItemAsync('fieldos_user_profile');
+    await SecureStore.deleteItemAsync(OFFLINE_LOGIN_KEY);
+  } catch { /* silent */ }
+  await clearResumePin();
+  try { await SecureStore.deleteItemAsync(SIGNED_OUT_KEY); } catch { /* silent */ }
   await mockDelay(200);
 }
 

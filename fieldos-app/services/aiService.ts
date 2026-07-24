@@ -166,11 +166,9 @@ export async function getPriorityQueue(officerId?: number): Promise<{
   try {
     const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
     const token = getAccessToken();
-    const params = new URLSearchParams();
-    if (officerId) params.set('officer_id', String(officerId));
-    const qs = params.toString() ? `?${params.toString()}` : '';
-
-    const res = await fetch(`${apiUrl}/manager/ai/priority-queue${qs}`, {
+    // Officer-scoped priority feed (real overdue/due from the officer's own clients).
+    // NOTE: /manager/ai/* is manager-only (403 for officers) — do not use it here.
+    const res = await fetch(`${apiUrl}/tasks/priority`, {
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -229,25 +227,45 @@ export async function getSuggestions(officerId?: number, category?: string): Pro
   }
 
   try {
-    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-    const token = getAccessToken();
-    const params = new URLSearchParams();
-    if (officerId) params.set('officer_id', String(officerId));
-    if (category) params.set('category', category);
-    const qs = params.toString() ? `?${params.toString()}` : '';
-
-    const res = await fetch(`${apiUrl}/manager/ai/suggestions${qs}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-
-    const json = await res.json();
-    if (json.success) {
-      return { success: true, data: json.data };
+    // Derive real, officer-scoped suggestions from the officer's real priority queue.
+    // (No /manager/ai/* — that's manager-only and 403s for a field officer.)
+    const pq = await getPriorityQueue(officerId);
+    if (!pq.success || !pq.data) {
+      return { success: false, error: pq.error || 'Failed to fetch suggestions' };
     }
-    return { success: false, error: json.detail || 'Failed to fetch suggestions' };
+    let items = pq.data.queue.filter((c) => c.priority_tier !== 'normal');
+    if (category === 'overdue') items = items.filter((c) => c.overdue_days > 0);
+    items = items.slice(0, 10);
+
+    const suggestions: AISuggestion[] = items.map((c, i) => ({
+      id: i + 1,
+      category: c.overdue_days > 0 ? 'overdue' : 'par',
+      urgency: c.priority_tier === 'critical' ? 'critical' : c.priority_tier === 'high' ? 'high' : 'medium',
+      title: c.overdue_days > 0
+        ? `${c.client_name} — ${c.overdue_days} days overdue`
+        : `${c.client_name} — installment due`,
+      description: c.suggestion,
+      client_id: c.client_id, member_id: c.member_id, client_name: c.client_name,
+      center_name: c.center_name, due_amount_npr: c.due_amount_npr, outstanding_npr: c.outstanding_npr,
+      days_missed: c.overdue_days,
+      action: c.overdue_days > 0 ? 'schedule_visit' : 'confirm_collection',
+      ai_rule: c.overdue_days >= 30 ? 'npa_risk' : c.overdue_days > 0 ? 'overdue' : 'due_today',
+      can_auto_act: false,
+    }));
+
+    const category_counts: Record<string, number> = {};
+    const urgency_counts: Record<string, number> = {};
+    for (const s of suggestions) {
+      category_counts[s.category] = (category_counts[s.category] || 0) + 1;
+      urgency_counts[s.urgency] = (urgency_counts[s.urgency] || 0) + 1;
+    }
+    return {
+      success: true,
+      data: {
+        total_suggestions: suggestions.length, category_counts, urgency_counts, suggestions,
+        disclaimer: 'Rule-based prompts from your own due/overdue clients. AI suggests — you decide and act.',
+      },
+    };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Network error' };
   }

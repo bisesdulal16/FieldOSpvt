@@ -24,13 +24,15 @@ try {
   mediapipe = null;
 }
 
-// Gemma 2B int4 (~1.3 GB) — overridable via env for other on-device models.
-const MODEL_NAME = process.env.EXPO_PUBLIC_ONDEVICE_MODEL_NAME || 'gemma-1.1-2b-it-int4.bin';
+// Gemma 3 1B int4 (~555 MB) MediaPipe .task — Google's current small on-device model.
+// Self-hosted at /dl (like the face model) because the HF gemma repos are gated (401)
+// and the old t-ghosh .bin URL now 404s. Overridable via env.
+const MODEL_NAME = process.env.EXPO_PUBLIC_ONDEVICE_MODEL_NAME || 'gemma3-1b-it-int4.task';
 const MODEL_URL =
   process.env.EXPO_PUBLIC_ONDEVICE_MODEL_URL ||
-  'https://huggingface.co/t-ghosh/gemma-tflite/resolve/main/gemma-1.1-2b-it-int4.bin';
-// Don't attempt a 2B model below this much total RAM.
-const MIN_RAM_BYTES = 3.4 * 1024 * 1024 * 1024;
+  'https://fieldos.hackdome.online/dl/gemma3-1b-it-int4.task';
+// Gemma-3 1B int4 is light — a ~2GB-RAM phone can run it. Lower the gate from the old 2B's 3.4GB.
+const MIN_RAM_BYTES = 2.2 * 1024 * 1024 * 1024;
 
 function RealProvider({ children }: { children: React.ReactNode }) {
   const llm = mediapipe.useLLM({
@@ -57,14 +59,19 @@ function RealProvider({ children }: { children: React.ReactNode }) {
         const cur = llmRef.current;
         console.log(`[OnDeviceLLM] downloadStatus=${cur.downloadStatus}; starting download/load…`);
         if (cur.downloadStatus !== 'downloaded') {
-          setOnDeviceLLM('downloading', null);
-          await cur.downloadModel();
+          setOnDeviceLLM('downloading', null, 0);
+          // Poll the hook's downloadProgress (0..1) so the UI can show a real bar.
+          const poll = setInterval(() => {
+            const p = llmRef.current?.downloadProgress;
+            if (typeof p === 'number') setOnDeviceLLM('downloading', null, p);
+          }, 500);
+          try { await cur.downloadModel(); } finally { clearInterval(poll); }
         }
         if (cancelled) return;
-        setOnDeviceLLM('loading', null);
+        setOnDeviceLLM('loading', null, 1);
         await cur.loadModel();
         if (cancelled) return;
-        setOnDeviceLLM('ready', (prompt: string) => llmRef.current.generateResponse(prompt));
+        setOnDeviceLLM('ready', (prompt: string) => llmRef.current.generateResponse(prompt), 1);
       } catch {
         setOnDeviceLLM('error', null);
       }
@@ -79,8 +86,34 @@ function RealProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Error boundary: the on-device LLM is a best-effort enhancement, NEVER a hard
+// dependency. If useLLM() or the native module throws during render (bad model
+// config, partial native init, low-end device), fall back to rendering the app
+// normally in server-AI mode instead of crashing the whole app on launch.
+class LLMBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.log('[OnDeviceLLM] provider crashed → server-AI fallback', err);
+    try { setOnDeviceLLM('unavailable', null); } catch { /* noop */ }
+  }
+  render() {
+    if (this.state.failed) return <>{this.props.children}</>;
+    return this.props.children as React.ReactElement;
+  }
+}
+
 export function OnDeviceLLMProvider({ children }: { children: React.ReactNode }) {
   // If the native module isn't present, render children as-is (Expo Go safe).
   if (!mediapipe?.useLLM) return <>{children}</>;
-  return <RealProvider>{children}</RealProvider>;
+  return (
+    <LLMBoundary>
+      <RealProvider>{children}</RealProvider>
+    </LLMBoundary>
+  );
 }

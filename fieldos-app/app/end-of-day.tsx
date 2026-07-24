@@ -10,6 +10,7 @@ import { SummaryCard } from '../components/fieldos/SummaryCard';
 import { PrimaryButton } from '../components/fieldos/PrimaryButton';
 import { SecondaryButton } from '../components/fieldos/SecondaryButton';
 import { ValidationError } from '../components/fieldos/ValidationError';
+import { useFieldOSStore } from '../store/useFieldOSStore';
 import { submitEndOfDayReport } from '../services';
 import { getSetting, setSetting } from '../db/repositories/settingsRepo';
 import { getTotalCollectedToday, getCollectionsByDate } from '../db/repositories/collectionsRepo';
@@ -148,6 +149,15 @@ export default function EndOfDayScreen() {
 
           // Submit EOD via service layer (local queue + audit), then show the
           // completion view in-place (replaces the form) rather than stacking.
+          // EOD ends the officer's day. The report submit is offline-first (queued
+          // locally), so the day must end whether or not the immediate network call
+          // succeeds — otherwise an offline/erroring submit leaves the day "started"
+          // and it restores on next login. End the day in a finally, not only on success.
+          const endDay = async () => {
+            try { await setSetting('eod_submitted_date', new Date().toISOString().split('T')[0], 'string'); } catch {}
+            try { await useFieldOSStore.getState().resetDay(); } catch {}
+            setSubmitted(true);
+          };
           submitEndOfDayReport({
             reportDate: new Date().toISOString().split('T')[0],
             totalCollections: stats.collected,
@@ -156,10 +166,7 @@ export default function EndOfDayScreen() {
             exceptions: [],
             isConfirmed: confirmed,
             faceVerified: false,
-          }).then(async () => {
-            try { await setSetting('eod_submitted_date', new Date().toISOString().split('T')[0], 'string'); } catch {}
-            setSubmitted(true);
-          }).catch(() => { setSubmitted(true); });
+          }).then(endDay).catch(endDay);
         }} icon="shield">{t('submitMyReport')}</PrimaryButton>
         <View style={styles.actionRow}>
           <SecondaryButton onPress={() => router.back()} icon="save">{t('draft')}</SecondaryButton>

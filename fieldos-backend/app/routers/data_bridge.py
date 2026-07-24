@@ -24,12 +24,13 @@ from app.models.client import Client
 from app.models.collection import Collection
 from app.models.user import User
 from app.schemas.common import ApiResponse
-from app.deps.auth_deps import require_manager_or_admin, get_current_user
+from app.deps.auth_deps import require_manager_or_admin, get_current_user, require_financial_access
 from app.services.audit_helper import write_audit
 from app.utils.nepal_time import today_nepal_str
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/data", tags=["Data Import/Export"])
+router = APIRouter(prefix="/data", tags=["Data Import/Export"],
+                   dependencies=[Depends(require_financial_access)])
 
 CLIENT_TEMPLATE = "member_id,name,phone_number,center_id,center_name,ward,outstanding_balance,due_amount,next_installment_date,overdue_days"
 

@@ -10,7 +10,7 @@ import { StatusChip } from '../../components/fieldos/StatusChip';
 import { PrimaryButton } from '../../components/fieldos/PrimaryButton';
 import { ValidationError } from '../../components/fieldos/ValidationError';
 import { recordCollection } from '../../services/collectionService';
-import { fetchClients } from '../../services/clientService';
+import { fetchClients, fetchClientDetail } from '../../services/clientService';
 import { useTranslation } from '../../i18n';
 
 const PAYMENT_METHODS = [
@@ -70,6 +70,36 @@ export default function RecordCollectionScreen() {
     } catch { setGpsStatus('denied'); }
   }, []);
 
+  // Capture GPS whenever we have a selected client, no matter how the officer got
+  // here. Previously captureGps only ran from pickClient (the in-tab picker), so
+  // arriving from a task / client-detail — the normal golden path — recorded the
+  // collection with NO location and never even prompted for permission.
+  useEffect(() => {
+    if (selectedClient && gpsStatus === 'idle') captureGps();
+  }, [selectedClient, gpsStatus, captureGps]);
+
+  // Refresh the client's real due/outstanding from the backend as soon as we land here
+  // with a client selected. The store object can be stale/partial (arriving from a task
+  // showed due=0), which both mis-displayed the amount and made the overpayment cap
+  // read the wrong ceiling. Runs once per client id.
+  useEffect(() => {
+    const cid = (selectedClient as any)?.clientId ?? Number(selectedClient?.id);
+    if (!cid) return;
+    let active = true;
+    (async () => {
+      try {
+        const res: any = await fetchClientDetail(cid);
+        const d = res?.data ?? res;
+        if (!active || !d) return;
+        const freshDue = Number(d.due_amount ?? d.dueAmount ?? d.loanAccount?.installmentAmount ?? 0);
+        const freshOut = Number(d.outstanding_balance ?? d.outstandingBalance ?? d.loanAccount?.outstandingBalance ?? 0);
+        setSelectedClient({ ...(selectedClient as any), dueAmount: freshDue, outstandingBalance: freshOut, clientId: cid });
+      } catch { /* offline: keep the store values */ }
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [(selectedClient as any)?.clientId, selectedClient?.id]);
+
   const pickClient = (c: any) => {
     const due = Number(c.due_amount ?? c.dueAmount ?? 0);
     setSelectedClient({
@@ -83,9 +113,11 @@ export default function RecordCollectionScreen() {
     captureGps();
   };
 
-  const client = selectedClient || { id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
-  const dueAmount = selectedClient?.dueAmount || 0;
-  const outstanding = selectedClient?.outstandingBalance || 0;
+  // Past the `if (!selectedClient)` guard below, a client is always selected — no
+  // placeholder fallback (the old hardcoded M-1042 caused 0-due/ghost-client bugs).
+  const client = selectedClient ?? { id: '', name: '', memberId: '' };
+  const dueAmount = Number(selectedClient?.dueAmount) || 0;
+  const outstanding = Number(selectedClient?.outstandingBalance) || 0;
   const amount = parseInt(collectionAmount) || 0;
   const isHighValue = amount >= 10000;
 
@@ -109,9 +141,16 @@ export default function RecordCollectionScreen() {
       return;
     }
 
-    if (isHighValue) {
-      // Show warning but still allow save
-      // The existing high-value warning card already shows
+    // Hard cap: a collection can never exceed the client's outstanding balance. This
+    // blocks the "210,000 against a 2,100 due" case on the device. The server enforces
+    // the same cap, but catching it here gives an immediate, clear message.
+    if (outstanding > 0 && amt > outstanding) {
+      setError(t('amountExceedsOutstanding').replace('{amount}', outstanding.toLocaleString()));
+      return;
+    }
+    if (outstanding <= 0) {
+      setError(t('noOutstandingToCollect'));
+      return;
     }
 
     setSaving(true);
@@ -128,9 +167,9 @@ export default function RecordCollectionScreen() {
       return;
     }
 
-    const due = selectedClient?.dueAmount || 5500;
+    const due = Number(selectedClient?.dueAmount) || 0;
     const remainingDue = Math.max(due - amt, 0);
-    const remainingOutstanding = Math.max((selectedClient?.outstandingBalance || 0) - amt, 0);
+    const remainingOutstanding = Math.max(outstanding - amt, 0);
 
     console.log('[Collect] payload to recordCollection:', {
       clientId: numericClientId,
@@ -155,6 +194,7 @@ export default function RecordCollectionScreen() {
         gpsLatitude: gps?.lat,
         gpsLongitude: gps?.lng,
         gpsAccuracyMeters: gps?.accuracy,
+        gpsAddress: gps?.address,
       });
       console.log('[Collection] Saved:', result.data?.receiptId);
 
@@ -270,6 +310,25 @@ export default function RecordCollectionScreen() {
               <Text style={styles.changeClientText}>{t('changeClient')}</Text>
             </TouchableOpacity>
           </View>
+          {/* Location capture status — visible so the anti-fraud GPS stamp isn't silent. */}
+          <TouchableOpacity
+            style={styles.gpsRow}
+            disabled={gpsStatus === 'capturing'}
+            onPress={() => { if (gpsStatus !== 'capturing') { setGpsStatus('idle'); } }}
+          >
+            <Ionicons
+              name={gpsStatus === 'done' ? 'location' : gpsStatus === 'denied' ? 'location-outline' : 'navigate-outline'}
+              size={14}
+              color={gpsStatus === 'done' ? colors.green : gpsStatus === 'denied' ? colors.red : colors.gray400}
+            />
+            <Text style={styles.gpsText}>
+              {gpsStatus === 'capturing' ? t('gpsCapturing')
+                : gpsStatus === 'done' ? (gps?.address || t('gpsCaptured'))
+                : gpsStatus === 'denied' ? t('gpsDeniedShort')
+                : t('gpsPending')}
+            </Text>
+            {gpsStatus === 'capturing' && <ActivityIndicator size="small" color={colors.gray400} />}
+          </TouchableOpacity>
           <View style={styles.amountRow}>
             <Text style={styles.amountLabel}>{t('dueAmount')}</Text>
             <Text style={styles.dueAmount}>NPR {dueAmount.toLocaleString()}</Text>
@@ -380,6 +439,8 @@ const styles = StyleSheet.create({
   clientId: { fontSize: fontSize.sm, color: colors.gray500 },
   changeClientBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: spacing.sm, borderRadius: borderRadius.sm, backgroundColor: colors.navyBg },
   changeClientText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.navy },
+  gpsRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm },
+  gpsText: { flex: 1, fontSize: fontSize.xs, color: colors.gray600 },
   amountRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.xs },
   amountLabel: { fontSize: fontSize.base, color: colors.gray500 },
   dueAmount: { fontSize: fontSize.lg, fontWeight: 'bold', color: colors.red },

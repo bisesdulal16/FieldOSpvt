@@ -13,12 +13,22 @@ import {
   QUICK_ACTIONS,
 } from '../services/aiAssistantService';
 import type { ChatMessage, QuickAction } from '../services/aiAssistantService';
+import { subscribeOnDeviceStatus, onDeviceStatus, onDeviceProgress, type OnDeviceStatus } from '../services/onDeviceLLM';
 
 export default function AIAssistantScreen() {
   const router = useRouter();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
+
+  // On-device Gemma status, so the officer sees the model download once and then
+  // that answers run privately on the phone. Falls back to the server otherwise.
+  const [llmStatus, setLlmStatus] = useState<OnDeviceStatus>(onDeviceStatus());
+  const [llmProgress, setLlmProgress] = useState<number>(onDeviceProgress());
+  useEffect(() => {
+    const unsub = subscribeOnDeviceStatus((s) => { setLlmStatus(s); setLlmProgress(onDeviceProgress()); });
+    return unsub;
+  }, []);
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     // Initialize from stored history (avoid setState in effect)
@@ -133,6 +143,32 @@ export default function AIAssistantScreen() {
           {t('aiChatDisclaimer')}
         </Text>
       </View>
+
+      {/* On-device Gemma status — clear download progress + a "runs on your phone" badge. */}
+      {(llmStatus === 'downloading' || llmStatus === 'loading' || llmStatus === 'ready') && (
+        <View style={[styles.llmBanner, llmStatus === 'ready' && styles.llmBannerReady]}>
+          <Ionicons
+            name={llmStatus === 'ready' ? 'phone-portrait' : 'cloud-download-outline'}
+            size={14}
+            color={llmStatus === 'ready' ? colors.green : colors.navy}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.llmText}>
+              {llmStatus === 'ready'
+                ? t('llmReady')
+                : llmStatus === 'loading'
+                ? t('llmLoading')
+                : `${t('llmDownloading')} ${Math.round(llmProgress * 100)}%`}
+            </Text>
+            {llmStatus === 'downloading' && (
+              <View style={styles.llmBarTrack}>
+                <View style={[styles.llmBarFill, { width: `${Math.max(3, Math.round(llmProgress * 100))}%` }]} />
+              </View>
+            )}
+          </View>
+          {llmStatus !== 'ready' && <ActivityIndicator size="small" color={colors.navy} />}
+        </View>
+      )}
 
       <ScrollView
         ref={scrollViewRef}
@@ -287,6 +323,16 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: `${colors.orange}30`,
   },
   disclaimerText: { flex: 1, fontSize: fontSize.xs, color: colors.orange, lineHeight: 16, fontWeight: '500' },
+  llmBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    padding: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.sm,
+    borderRadius: borderRadius.lg, backgroundColor: `${colors.navy}0D`,
+    borderWidth: 1, borderColor: `${colors.navy}22`,
+  },
+  llmBannerReady: { backgroundColor: `${colors.green}12`, borderColor: `${colors.green}33` },
+  llmText: { fontSize: fontSize.xs, color: colors.gray700, fontWeight: '600' },
+  llmBarTrack: { height: 4, borderRadius: 2, backgroundColor: `${colors.navy}18`, marginTop: 4, overflow: 'hidden' },
+  llmBarFill: { height: 4, borderRadius: 2, backgroundColor: colors.navy },
   chatArea: { flex: 1 },
   chatContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: 8, gap: spacing.sm },
 

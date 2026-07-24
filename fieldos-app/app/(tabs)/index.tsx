@@ -18,10 +18,18 @@ import { fetchAssignedTasks } from '../../services/taskService';
 import { startDayWithVerification, captureSelfie } from '../../services/dayStartService';
 import type { FaceResult } from '../../services/dayStartService';
 import { FaceScanner } from '../../components/fieldos/FaceScanner';
-import { isEnrolled, verifyEmbedding } from '../../services/faceVerifyService';
+import { isEnrolled, verifyEmbedding, FACE_MATCH_THRESHOLD } from '../../services/faceVerifyService';
+
+// Tuning aid: when EXPO_PUBLIC_FACE_DEBUG=true, every clock-in shows the raw
+// similarity score so the threshold can be calibrated on real devices/faces (F4).
+const FACE_DEBUG = process.env.EXPO_PUBLIC_FACE_DEBUG === 'true';
+// Face clock-in is OFF by default for the pilot (unproven accuracy — the day-start
+// selfie is the real control). Set EXPO_PUBLIC_FACE_CLOCKIN=true for tuning builds.
+const FACE_CLOCKIN_ENABLED = process.env.EXPO_PUBLIC_FACE_CLOCKIN === 'true';
 import { getActivePromises } from '../../db/repositories/promiseToPayRepo';
 import { getTotalCollectedToday } from '../../db/repositories/collectionsRepo';
 import { query } from '../../db/database';
+import { getSetting, setSetting } from '../../db/repositories/settingsRepo';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -39,6 +47,25 @@ export default function DashboardScreen() {
   const totalUnsynced = syncItemsReady + syncFailedCount;
   const [startingDay, setStartingDay] = useState(false);
   const [showFaceScan, setShowFaceScan] = useState(false);
+
+  // Live "time on shift" clock — ticks while the day is active so the officer can
+  // see how long they've been working and there's a clear day boundary to end.
+  const [elapsed, setElapsed] = useState('');
+  useEffect(() => {
+    if (!dayStarted) { setElapsed(''); return; }
+    let active = true;
+    const tick = async () => {
+      const iso = await getSetting('day_started_at');
+      if (!active || !iso) return;
+      const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      setElapsed(h > 0 ? `${h}h ${m}m` : `${m}m`);
+    };
+    tick();
+    const id = setInterval(tick, 60_000); // once a minute is enough for h/m display
+    return () => { active = false; clearInterval(id); };
+  }, [dayStarted]);
 
   // Finish start-of-day: capture a selfie for the manager (only when face-match
   // didn't run), then the server checks the officer is on the branch office
@@ -67,6 +94,11 @@ export default function DashboardScreen() {
   const handleStartDay = useCallback(async () => {
     if (startingDay) return;
     setStartingDay(true);
+    if (!FACE_CLOCKIN_ENABLED) {
+      // Pilot: skip face-match, use plain selfie photo-proof as the control.
+      finishDayStart(null);
+      return;
+    }
     const enrolled = await isEnrolled();
     if (enrolled) {
       setShowFaceScan(true); // the FaceScanner overlay drives the rest
@@ -83,11 +115,19 @@ export default function DashboardScreen() {
   const handleFaceEmbedding = useCallback(async (embedding: number[]) => {
     setShowFaceScan(false);
     const face = await verifyEmbedding(embedding);
-    if (!face.verified) {
-      Alert.alert(t('faceNoMatchTitle'), t('faceNoMatchMsg'));
-      setStartingDay(false);
-      return;
+    const scoreLine = `${t('faceScoreLabel')}: ${face.similarity.toFixed(3)}  (${t('faceThresholdLabel')} ${FACE_MATCH_THRESHOLD})`;
+    // Tuning mode: show the score on every attempt so the threshold can be calibrated.
+    if (FACE_DEBUG) {
+      await new Promise<void>((resolve) =>
+        Alert.alert(
+          face.verified ? t('faceMatchTitle') : t('faceNoMatchTitle'),
+          scoreLine,
+          [{ text: 'OK', onPress: () => resolve() }],
+        ),
+      );
     }
+    // Face-match is INFORMATIONAL for the pilot (the day-start selfie is the control):
+    // record the result + score for the manager, but never block the officer's day on it.
     await finishDayStart(face);
   }, [finishDayStart, t]);
 
@@ -106,6 +146,7 @@ export default function DashboardScreen() {
   const [priorityQueue, setPriorityQueue] = useState<PriorityClient[]>([]);
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [officer, setOfficer] = useState<any>(null); // the real logged-in officer
   const [topClient, setTopClient] = useState<PriorityClient | null>(null);
   const [topSuggestion, setTopSuggestion] = useState<AISuggestion | null>(null);
   const [urgentCount, setUrgentCount] = useState(0);
@@ -146,6 +187,7 @@ export default function DashboardScreen() {
     try {
       setAiLoading(true);
       const user = await getCurrentUser();
+      if (user) setOfficer(user);
       const officerId = user?.id;
 
       const [pqResult, sugResult] = await Promise.all([
@@ -182,6 +224,26 @@ export default function DashboardScreen() {
       fetchAIData();
     }
   }, [dayStarted, fetchAIData]);
+
+  // First-run face enrollment: if this officer has never enrolled a reference face,
+  // offer it once (with Skip — never hard-blocks the golden path). Without an enrolled
+  // template, clock-in has nothing to match against and any face passes, so this is
+  // what makes the face feature real. Covers every login path since Home always mounts.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (await getSetting('face_enroll_prompted') === 'true') return;
+        if (cancelled || await isEnrolled()) return; // already enrolled
+        await setSetting('face_enroll_prompted', 'true', 'boolean');
+        Alert.alert(t('faceEnrollPromptTitle'), t('faceEnrollPromptMsg'), [
+          { text: t('faceEnrollLater'), style: 'cancel' },
+          { text: t('faceEnrollNow'), onPress: () => router.push('/face-enroll') },
+        ]);
+      } catch { /* enrollment is best-effort — never block Home */ }
+    })();
+    return () => { cancelled = true; };
+  }, [t, router]);
 
   const quickActions = [
     { label: t('dueList'), icon: 'list-outline' as const, screen: '/tasks' as const },
@@ -242,16 +304,22 @@ export default function DashboardScreen() {
         />
         <View style={styles.greetingSection}>
           <View>
-            <Text style={styles.greeting}>{t('greeting')}</Text>
+            <Text style={styles.greeting}>
+              {t('greeting')}{officer?.name ? `, ${String(officer.name).split(' ')[0]}` : ''}
+            </Text>
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={10} color={colors.gray500} />
-              <Text style={styles.locationText}>{t('branchName')}</Text>
+              <Text style={styles.locationText}>
+                {officer?.branchName || officer?.branch_name || t('branchName')}
+              </Text>
             </View>
           </View>
           {dayStarted && (
             <View style={styles.dayStartedRow}>
               <Ionicons name="checkmark-circle" size={10} color={colors.green} />
-              <Text style={styles.dayStartedText}>{t('dayStarted')} · {dayVerifiedAt}</Text>
+              <Text style={styles.dayStartedText}>
+                {t('dayStarted')} · {dayVerifiedAt}{elapsed ? ` · ${elapsed} ${t('onShift')}` : ''}
+              </Text>
             </View>
           )}
         </View>
@@ -366,18 +434,7 @@ export default function DashboardScreen() {
                   }
                 }}
               />
-            ) : (
-              <AIRecommendationCard
-                title={t('suggestedFirst')}
-                reason={t('reasonPromiseOverdue8')}
-                clientName="Sunita Kumari Chaudhary"
-                action={t('startVisit')}
-                onAction={() => {
-                  setSelectedClient({ id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042', clientId: 1 });
-                  router.push('/client-detail');
-                }}
-              />
-            )}
+            ) : null}
 
             <Text style={styles.sectionTitle}>{t('quickActions')}</Text>
             <View style={styles.grid2}>
@@ -456,26 +513,10 @@ export default function DashboardScreen() {
               <View style={styles.priorityCard}>
                 <View style={styles.priorityHeader}>
                   <Text style={styles.priorityTitle}>{t('priorityClient')}</Text>
-                  <StatusChip label={t('overdue')} variant="overdue" />
                 </View>
                 <View style={styles.priorityBody}>
-                  <View style={[styles.priorityAvatar, { backgroundColor: colors.red }]}>
-                    <Text style={styles.avatarText}>ST</Text>
-                  </View>
-                  <View style={styles.priorityInfo}>
-                    <Text style={styles.priorityName}>Sita Devi Sah</Text>
-                    <Text style={styles.priorityMeta}>M-1089 · Ward 5, Kalanki</Text>
-                    <Text style={[styles.priorityAmount, { color: colors.red }]}>NPR 15,000</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSelectedClient({ id: 'M-1089', name: 'Sita Devi Sah', memberId: 'M-1089', clientId: 3 });
-                      router.push('/client-detail');
-                    }}
-                    style={styles.chevronButton}
-                  >
-                    <Ionicons name="chevron-forward" size={16} color={colors.gray400} />
-                  </TouchableOpacity>
+                  <Ionicons name="checkmark-circle-outline" size={20} color={colors.green} />
+                  <Text style={[styles.priorityMeta, { marginLeft: spacing.sm }]}>{t('noPriorityClients')}</Text>
                 </View>
               </View>
             )}
@@ -502,19 +543,21 @@ export default function DashboardScreen() {
 
             <TouchableOpacity
               onPress={() => router.push('/end-of-day')}
-              style={styles.eodCard}
+              style={styles.endDayCard}
               activeOpacity={0.9}
             >
               <View style={styles.eodLeft}>
-                <View style={styles.eodIcon}>
-                  <Ionicons name="list-outline" size={16} color={colors.navy} />
+                <View style={styles.endDayIcon}>
+                  <Ionicons name="power" size={16} color={colors.white} />
                 </View>
                 <View>
-                  <Text style={styles.eodTitle}>{t('endOfDaySummary')}</Text>
-                  <Text style={styles.eodDesc}>{t('reviewProgress')}</Text>
+                  <Text style={styles.endDayTitle}>{t('endDayBtn')}</Text>
+                  <Text style={styles.endDayDesc}>
+                    {t('reviewProgress')}{elapsed ? ` · ${elapsed} ${t('onShift')}` : ''}
+                  </Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.gray400} />
+              <Ionicons name="chevron-forward" size={16} color={colors.white} />
             </TouchableOpacity>
           </>
         )}
@@ -583,6 +626,11 @@ const styles = StyleSheet.create({
   eodIcon: { width: 32, height: 32, borderRadius: borderRadius.sm, backgroundColor: `${colors.navy}15`, alignItems: 'center', justifyContent: 'center' },
   eodTitle: { fontSize: fontSize.base, fontWeight: '600', color: colors.gray700 },
   eodDesc: { fontSize: fontSize.xs, color: colors.gray400 },
+  // Clear "End Day" action — navy card so it reads as the deliberate end-of-shift boundary.
+  endDayCard: { backgroundColor: colors.navy, borderRadius: borderRadius.lg, padding: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  endDayIcon: { width: 32, height: 32, borderRadius: borderRadius.sm, backgroundColor: `${colors.white}22`, alignItems: 'center', justifyContent: 'center' },
+  endDayTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.white },
+  endDayDesc: { fontSize: fontSize.xs, color: `${colors.white}CC` },
   aiLoadingCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: borderRadius.lg, backgroundColor: colors.navyBg },
   aiLoadingText: { fontSize: fontSize.sm, color: colors.navy },
   aiBanner: { borderRadius: borderRadius.lg, padding: spacing.md, backgroundColor: colors.navyBg, borderWidth: 1, borderColor: `${colors.navy}20` },

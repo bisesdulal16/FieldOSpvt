@@ -5,7 +5,8 @@
  * When mock mode is enabled, returns mock task data.
  */
 
-import { getConfig } from './apiClient';
+import { getConfig, getCurrentStaffId } from './apiClient';
+import { getSetting, setSetting } from '../db/repositories/settingsRepo';
 import type { TaskAssignment, FetchTasksRequest, ApiResponse } from '../types/api';
 
 // ─── Mock Data ───────────────────────────────────────────────────
@@ -57,29 +58,35 @@ export async function fetchAssignedTasks(req?: FetchTasksRequest): Promise<ApiRe
   console.log('[Tasks] fetch URL:', `${apiUrl}/tasks/today?${params}`);
   console.log('[Tasks] current user id/staff_id:', token ? 'token present (length=' + token.length + ')' : 'NO TOKEN');
 
-  const response = await fetch(`${apiUrl}/tasks/today?${params}`, {
-    headers: {
-      'Authorization': token ? `Bearer ${token}` : 'Bearer undefined',
-      'Content-Type': 'application/json',
-    },
-  });
-
-  console.log('[Tasks] response status:', response.status);
-
-  const text = await response.text();
-  console.log('[Tasks] response body:', text?.substring(0, 1000));
+  // Cache today's tasks per officer so an OFFLINE login still shows them.
+  const cacheKey = `cached_tasks:${getCurrentStaffId() || 'me'}`;
 
   try {
+    const response = await fetch(`${apiUrl}/tasks/today?${params}`, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : 'Bearer undefined',
+        'Content-Type': 'application/json',
+      },
+    });
+    const text = await response.text();
     const parsed = JSON.parse(text);
     // The API returns snake_case (client_id, client_name, member_id). Normalize to the
     // camelCase TaskAssignment shape the app relies on — otherwise selectedClient.clientId
     // is undefined and Record Collection fails with "Client information missing".
     if (parsed && Array.isArray(parsed.data)) {
       parsed.data = parsed.data.map(normalizeTask);
+      try { await setSetting(cacheKey, JSON.stringify(parsed.data), 'string'); } catch {}
     }
     return parsed;
   } catch {
-    return { success: false, data: [], error: 'Invalid response from server', timestamp: new Date().toISOString() };
+    // Offline / server unreachable → serve this officer's last cached tasks.
+    try {
+      const cached = await getSetting(cacheKey);
+      if (cached) {
+        return { success: true, data: JSON.parse(cached), timestamp: new Date().toISOString() };
+      }
+    } catch { /* no cache */ }
+    return { success: false, data: [], error: 'offline', timestamp: new Date().toISOString() };
   }
 }
 

@@ -50,6 +50,7 @@ export async function recordCollection(req: CreateCollectionRequest): Promise<Ap
     faceVerified: req.faceVerified,
     gpsLatitude: req.gpsLatitude,
     gpsLongitude: req.gpsLongitude,
+    gpsAddress: req.gpsAddress,
     capturedAt: new Date().toISOString(),
   }, collectionId);
 
@@ -135,6 +136,7 @@ async function trySyncToServer(req: CreateCollectionRequest, collectionId: numbe
       gps_latitude: req.gpsLatitude,
       gps_longitude: req.gpsLongitude,
       gps_accuracy_meters: req.gpsAccuracyMeters,
+      gps_address: req.gpsAddress,
       collected_at: new Date().toISOString(),
       receipt_id: receiptId,
     };

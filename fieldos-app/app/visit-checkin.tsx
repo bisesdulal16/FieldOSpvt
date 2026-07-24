@@ -45,7 +45,7 @@ export default function VisitCheckinScreen() {
   const [gpsData, setGpsData] = useState<GpsData | null>(null);
   const [saveReason, setSaveReason] = useState('');
 
-  const client = selectedClient || { id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
+  const client = selectedClient || { id: '', name: '', memberId: '' };
   const initials = client.name.split(' ').map(n => n[0]).slice(0, 2).join('');
 
   // 10-second timeout utility

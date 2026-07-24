@@ -1,0 +1,27 @@
+# Optional: expose ONLY the FieldOS dashboard + backend to a collaborator via a
+# dedicated Cloudflare Tunnel — nothing else on this homelab host is reachable.
+#
+# This is a dashboard-managed (token) tunnel, matching your existing cloudflared setup.
+# One-time setup in the Cloudflare Zero Trust dashboard (Networks -> Tunnels):
+#   1. Create a tunnel, e.g. "fieldos". Copy its token.
+#   2. Put it in .env:   FIELDOS_TUNNEL_TOKEN=eyJ...   (gitignored)
+#   3. Add two Public Hostnames on that tunnel (Service targets use the compose
+#      network names, since this container joins fieldospvt_default):
+#        fieldos-api.hackdome.online  ->  http://backend:8000     (mobile app + API)
+#        fieldos.hackdome.online      ->  http://dashboard:3000   (manager dashboard)
+#   4. Point the mobile app at the api hostname (already set in fieldos-app/eas.json).
+#
+# Run (alongside the app stack):
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml \
+#                  -f docker-compose.cloudflared.yml up -d
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: fieldos-cloudflared
+    command: ["--no-autoupdate", "tunnel", "run"]
+    environment:
+      TUNNEL_TOKEN: ${FIELDOS_TUNNEL_TOKEN:?set FIELDOS_TUNNEL_TOKEN in .env after creating the tunnel}
+    depends_on:
+      - backend
+      - dashboard
+    restart: unless-stopped

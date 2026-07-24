@@ -59,14 +59,23 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
         if entity_type == "collection":
             amount = float(payload.get("amount", 0))
             client_id = payload.get("client_id")
-            # Compute the resulting balance from the client's real outstanding, not the payload.
-            outstanding_after = float(payload.get("outstanding_after", 0))
+            # Single source of truth: the client's real outstanding. The payload's
+            # outstanding_after is ignored. Offline collections are NOT rejected (we
+            # must not silently drop a real field collection), but the amount is capped
+            # at the outstanding balance so a bad/old app build can't over-collect via
+            # sync (mirrors the hard cap on the direct-POST path).
             client = None
             if client_id:
                 client_result = await session.execute(select(Client).where(Client.id == client_id))
                 client = client_result.scalar_one_or_none()
-                if client:
-                    outstanding_after = max(0.0, float(client.outstanding_balance) - amount)
+            current_outstanding = float(client.outstanding_balance or 0.0) if client else 0.0
+            if client and amount > current_outstanding:
+                logger.warning(
+                    "Sync collection %s capped: amount %.2f > outstanding %.2f (client %s)",
+                    entity_id, amount, current_outstanding, client_id,
+                )
+                amount = current_outstanding
+            outstanding_after = max(0.0, current_outstanding - amount)
             collection = Collection(
                 receipt_id=payload.get("receipt_id", entity_id),
                 client_id=client_id,

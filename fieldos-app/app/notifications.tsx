@@ -108,7 +108,6 @@ export default function NotificationsScreen() {
           isAnnouncement: true,
         })),
         syncNotification,
-        ...STATIC_NOTIFICATIONS,
       ].filter((n): n is NotificationItem => n != null) as NotificationItem[]
     : [...announcements.map((a): NotificationItem => ({
         icon: a.priority === 'urgent' ? 'alert-circle' : 'person-outline',
@@ -124,7 +123,6 @@ export default function NotificationsScreen() {
         isAnnouncement: true,
       })),
         ...(syncNotification ? [syncNotification] : []),
-        ...STATIC_NOTIFICATIONS,
       ];
 
   const filtered = notificationFilter === 'all' ? allNotifications : allNotifications.filter(n => n.filter === notificationFilter);
@@ -174,8 +172,9 @@ export default function NotificationsScreen() {
                   time={notif.time}
                   actionLabel={notif.actionLabel ? (isNe ? notif.actionLabelNe : notif.actionLabel) : undefined}
                   onAction={notif.screen ? () => {
-                    if (notif.screen === 'client-detail') setSelectedClient({ id: 'M-1042', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' });
-                    const screenPaths: Record<string, string> = { 'client-detail': '/client-detail', 'sync-center': '/sync-center', 'due-collections': '/tasks', 'center-meeting': '/center-meeting' };
+                    // Don't open client-detail from a notification without a real client;
+                    // send the officer to their task list to pick the right borrower.
+                    const screenPaths: Record<string, string> = { 'client-detail': '/tasks', 'sync-center': '/sync-center', 'due-collections': '/tasks', 'center-meeting': '/center-meeting' };
                     router.push(screenPaths[notif.screen!] || '/');
                   } : undefined}
                 />

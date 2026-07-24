@@ -20,22 +20,32 @@ export type OnDeviceStatus =
   | 'error';
 
 let _status: OnDeviceStatus = 'unavailable';
+let _progress = 0; // 0..1 download progress while status === 'downloading'
 let _generate: ((prompt: string) => Promise<string>) | null = null;
 const _listeners = new Set<(s: OnDeviceStatus) => void>();
 
-/** Called by the provider as the model progresses through its lifecycle. */
+/** Called by the provider as the model progresses through its lifecycle.
+ *  `progress` (0..1) is the model-file download fraction; surfaced in the UI. */
 export function setOnDeviceLLM(
   status: OnDeviceStatus,
   generate: ((prompt: string) => Promise<string>) | null,
+  progress?: number,
 ): void {
   _status = status;
+  if (typeof progress === 'number') _progress = Math.max(0, Math.min(1, progress));
+  if (status === 'ready') _progress = 1;
   _generate = status === 'ready' ? generate : null;
-  console.log(`[OnDeviceLLM] status → ${status}`);
+  console.log(`[OnDeviceLLM] status → ${status}${status === 'downloading' ? ` (${Math.round(_progress * 100)}%)` : ''}`);
   for (const l of _listeners) l(status);
 }
 
 export function onDeviceStatus(): OnDeviceStatus {
   return _status;
+}
+
+/** Download progress 0..1 (meaningful while status === 'downloading'). */
+export function onDeviceProgress(): number {
+  return _progress;
 }
 
 export function subscribeOnDeviceStatus(cb: (s: OnDeviceStatus) => void): () => void {

@@ -55,6 +55,18 @@ export interface ApiClientError {
 
 let _accessToken: string | null = null;
 let _refreshToken: string | null = null;
+// The staff_id of the officer currently signed in on this device. Used to stamp
+// offline sync-queue items so one officer's queued actions never sync (and get
+// mis-attributed) under a different officer who later logs in on the same device.
+let _currentStaffId: string | null = null;
+
+export function setCurrentStaffId(staffId: string | null): void {
+  _currentStaffId = staffId || null;
+}
+
+export function getCurrentStaffId(): string | null {
+  return _currentStaffId;
+}
 
 export function setTokens(accessToken: string, refreshToken: string): void {
   _accessToken = accessToken;
@@ -84,10 +96,22 @@ export async function loadTokens(): Promise<void> {
 export function clearTokens(): void {
   _accessToken = null;
   _refreshToken = null;
+  _currentStaffId = null;
   try {
     SecureStore.deleteItemAsync('fieldos_access_token');
     SecureStore.deleteItemAsync('fieldos_refresh_token');
   } catch { /* fallback silently */ }
+}
+
+/**
+ * End the in-memory session (return the app to the login screen) WITHOUT deleting
+ * the persisted token from secure storage — so a field-friendly logout can still
+ * allow an OFFLINE re-login within the token's lifetime. See authService.logout.
+ */
+export function endSessionInMemory(): void {
+  _accessToken = null;
+  _refreshToken = null;
+  _currentStaffId = null;
 }
 
 export function isAuthenticated(): boolean {
@@ -220,6 +244,19 @@ async function tryRefreshToken(): Promise<boolean> {
   })();
 
   return refreshPromise;
+}
+
+/**
+ * Refresh the access token and return the new one, or null if refresh failed.
+ * Shares the single-flight `tryRefreshToken` mutex so concurrent callers (e.g. the
+ * offline-sync push, which uses a raw fetch outside `request`) don't stampede the
+ * refresh endpoint. Used by syncService to recover from a 401 mid-drain instead of
+ * stalling the queue on a stale in-memory token.
+ */
+export async function refreshAccessToken(): Promise<string | null> {
+  if (!_refreshToken) return null;
+  const ok = await tryRefreshToken();
+  return ok ? _accessToken : null;
 }
 
 // ─── Convenience Methods ─────────────────────────────────────────

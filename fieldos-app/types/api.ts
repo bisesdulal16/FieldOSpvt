@@ -295,6 +295,7 @@ export interface CreateCollectionRequest {
   gpsLatitude?: number;
   gpsLongitude?: number;
   gpsAccuracyMeters?: number;
+  gpsAddress?: string;
   faceVerified: boolean;
   visitId?: number;
 }

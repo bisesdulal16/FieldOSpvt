@@ -220,7 +220,7 @@ function getMockAnswer(question: string, context?: FieldOSContext): string {
   const q = question.toLowerCase();
 
   if (q.includes('due today') || q.includes('due client')) {
-    return `You have 6 clients with payments due today:\n\n• Sunita Kumari Chaudhary (M-1042) — NPR 5,500\n• Rita Devi Sharma (M-1043) — NPR 3,200\n• Sita Devi Sah (M-1089) — NPR 5,000 (PTP today)\n• Ramesh BK (M-1044) — NPR 7,500\n• Maya Tamang (M-1045) — NPR 2,800\n• Gita Kumari (M-1046) — NPR 4,200\n\nTotal due: NPR 28,200\n\n⚡ AI suggestion only — verify before acting.`;
+    return `Your clients with payments due today are on your Tasks tab, ranked by priority (most overdue first). Open Tasks to see each borrower's name, member ID and due amount, then start a visit.\n\n⚡ AI suggestion only — verify before acting.`;
   }
 
   if (q.includes('sync') || q.includes('pending')) {
@@ -230,12 +230,12 @@ function getMockAnswer(question: string, context?: FieldOSContext): string {
 
   if (q.includes('promise') || q.includes('ptp')) {
     const count = context?.promiseToPayDue ?? 1;
-    return `You have ${count} promise-to-pay due today:\n\n• Sita Devi Sah (M-1089) — NPR 5,000 promised\n  Status: Pending — collection not yet confirmed\n\nAction: Visit Sita Devi Sah today to collect the promised amount.\n\n⚡ AI suggestion only — verify before acting.`;
+    return `Promise-to-pay commitments due today appear on your Tasks tab (filter: Promise). Visit each borrower to collect the promised amount and record the collection.\n\n⚡ AI suggestion only — verify before acting.`;
   }
 
   if (q.includes('overdue')) {
     const count = context?.overdueClients ?? 4;
-    return `You have ${count} overdue client(s):\n\n🔴 Critical (>30 days):\n  — (No NPA clients currently)\n\n🟠 High (>14 days):\n  — Babita Devi Rai (M-017) — 35 days, NPR 85,000 outstanding\n\n🟡 Medium (>7 days):\n  — Sita Devi Sah (M-1089) — 8 days, NPR 25,000\n\nAction: Prioritize Babita Devi Rai — NPA risk if not resolved within 30 days.\n\n⚡ AI suggestion only — verify before acting.`;
+    return `Your overdue clients are ranked on the Home priority card and Tasks tab — critical (30+ days, NPA risk) first, then high (14+) and medium (7+). Prioritise the most overdue borrowers and escalate any NPA-risk cases to your manager.\n\n⚡ AI suggestion only — verify before acting.`;
   }
 
   if (q.includes('collection') || q.includes('today')) {

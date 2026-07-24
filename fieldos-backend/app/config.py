@@ -41,6 +41,13 @@ class Settings:
     ORG_ACCENT_COLOR: str = os.getenv("ORG_ACCENT_COLOR", "#F59E0B")
     ORG_LOGO_URL: str = os.getenv("ORG_LOGO_URL", "")
 
+    # ── Day-start office-network gate (master switch) ─────────────────────
+    # OFF for the pilot: officers may start their day from any network. The
+    # per-branch `Branch.office_ip` gate is only enforced when this is enabled,
+    # so a stray/re-seeded office_ip can never lock a pilot officer out. Set
+    # DAY_START_IP_GATE=true (and register the branch's real public IP) to enforce.
+    DAY_START_IP_GATE: bool = os.getenv("DAY_START_IP_GATE", "false").strip().lower() in ("1", "true", "yes", "on")
+
     # ── SMS gateway (client receipt notifications) ────────────────────────
     # SMS_PROVIDER=log     → dev/demo: records the message, sends nothing (no gateway needed)
     # SMS_PROVIDER=sparrow → Nepal production via Sparrow SMS (needs token + credits)

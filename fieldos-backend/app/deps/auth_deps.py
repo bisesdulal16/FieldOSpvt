@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, Department
 from app.services.auth_service import verify_token
 
 logger = logging.getLogger(__name__)
@@ -166,6 +166,37 @@ def require_role(*allowed_roles: str) -> Callable:
 
 
 # ---------------------------------------------------------------------------
+# require_department — factory for the org-matrix department axis
+# ---------------------------------------------------------------------------
+
+def require_department(*allowed_departments: str) -> Callable:
+    """
+    Returns a dependency that checks the current user's `department` (the org
+    matrix axis from PILOT_SCOPE_V2.md §2), independent of `role`.
+
+    This is what enforces boundaries a single role enum can't express — e.g.
+    walling `admin_it` off from financial data, or restricting feedback triage
+    to operations/audit/head_office. Older rows default to `operations`
+    (see the A2 backfill), so this is safe on pre-migration users.
+
+    Usage:
+        @router.get("/x", dependencies=[Depends(require_department("audit", "head_office"))])
+    """
+
+    async def dept_checker(current_user: User = Depends(get_current_user)) -> User:
+        user_dept = getattr(current_user, "department", None)
+        if user_dept not in allowed_departments:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required department: {', '.join(allowed_departments)}. "
+                       f"Your department: {user_dept}.",
+            )
+        return current_user
+
+    return dept_checker
+
+
+# ---------------------------------------------------------------------------
 # Pre-built role dependencies
 # ---------------------------------------------------------------------------
 
@@ -185,4 +216,25 @@ require_any_role = require_role(
     UserRole.BRANCH_MANAGER.value,
     UserRole.AREA_MANAGER.value,
     UserRole.ADMIN.value,
+)
+
+
+# ---------------------------------------------------------------------------
+# Pre-built department dependencies (org matrix — PILOT_SCOPE_V2.md §2b / §8-C)
+# ---------------------------------------------------------------------------
+
+# The financial-data wall. `admin_it` administers users/devices/config but must
+# NOT read or write financial/client data (a system admin must not be able to
+# silently read collections or alter a loan — this is itself part of the audit
+# story). Attach this at the router level on every money/client-PII router so
+# the boundary is enforced in PERMISSIONS, not merely hidden in the UI.
+#   operations   → field/branch (write the money loop)
+#   audit        → monitoring (read across all branches, flag)
+#   head_office  → org-wide operational + strategic
+# Everyone EXCEPT admin_it. Older users default to `operations` (A2 backfill),
+# so this is safe on pre-migration accounts.
+require_financial_access = require_department(
+    Department.OPERATIONS.value,
+    Department.AUDIT.value,
+    Department.HEAD_OFFICE.value,
 )

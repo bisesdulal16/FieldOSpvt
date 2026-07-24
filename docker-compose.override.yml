@@ -1,0 +1,25 @@
+# Host-port remaps for THIS homelab VM (not a dedicated box).
+# The committed docker-compose.yml is left untouched; these overrides REPLACE
+# (via the !override tag, not append) the host-published ports to avoid
+# collisions with existing containers on this host:
+#   :3000  taken by eufy-security-ws   -> dashboard on :3100
+#   :9000  taken by portainer          -> whisper   on :9002 (ai profile)
+#   :11434 taken by host ollama        -> ollama    on :11435 (ai profile)
+# backend stays on :8000 (free); postgres stays internal (no host publish).
+services:
+  dashboard:
+    ports: !override
+      - "3100:3000"
+    # Serve the officer APK + face model from the dashboard's public/ dir, so they
+    # get permanent URLs on the existing tunnel hostname (no extra CF hostname, and
+    # no dependency on EAS artifact links, which expire ~30 days after each build):
+    #   https://fieldos.hackdome.online/dl/fieldos.apk
+    #   https://fieldos.hackdome.online/dl/mobilefacenet.tflite
+    volumes:
+      - /root/fieldos-files:/app/public/dl:ro
+  whisper:
+    ports: !override
+      - "9002:8000"
+  ollama:
+    ports: !override
+      - "11435:11434"

@@ -8,11 +8,12 @@ from app.models.user import User
 from app.schemas.visit import VisitCheckinCreate
 from app.schemas.common import ApiResponse
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 from app.utils.nepal_time import now_nepal_iso
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/visit-checkins", tags=["Visit Check-ins"])
+router = APIRouter(prefix="/visit-checkins", tags=["Visit Check-ins"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 @router.post("/", response_model=ApiResponse)

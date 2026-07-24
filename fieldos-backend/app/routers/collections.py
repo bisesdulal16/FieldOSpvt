@@ -13,11 +13,12 @@ from app.schemas.common import ApiResponse
 from app.services import auth_service
 from app.services.audit_helper import write_audit
 from app.services.sms_service import record_and_send_receipt
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 from app.utils.nepal_time import to_nepal_iso
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/collections", tags=["Collections"])
+router = APIRouter(prefix="/collections", tags=["Collections"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 @router.post("/", response_model=ApiResponse)
@@ -31,15 +32,42 @@ async def create_collection(
         amount = float(request.amount)
         is_high_value = request.is_high_value or amount >= 50000
 
-        # Server computes the resulting balance from the client's real outstanding —
-        # never trust an "outstanding_after" sent by the device.
+        if amount <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Collection amount must be greater than zero.",
+            )
+
+        # The client's REAL outstanding balance is the single source of truth. The
+        # device-sent `outstanding_after` is ignored entirely — the server always
+        # recomputes it, so a stale/zero client object on the device can never write
+        # a wrong balance (this caused the "collected 2000 but due unchanged" bug).
         client = None
-        outstanding_after = float(request.outstanding_after) if request.outstanding_after else 0.0
         if request.client_id:
             client_result = await db.execute(select(Client).where(Client.id == request.client_id))
             client = client_result.scalar_one_or_none()
-            if client:
-                outstanding_after = max(0.0, float(client.outstanding_balance) - amount)
+        if not client:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Client not found — cannot record a collection.",
+            )
+
+        current_outstanding = float(client.outstanding_balance or 0.0)
+        # Hard cap: a collection can never exceed the outstanding balance. This blocks
+        # the "210,000 against a 2,100 due" fat-finger/fraud case at the server, so no
+        # buggy or old app build can over-collect.
+        if current_outstanding <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This client has no outstanding balance to collect against.",
+            )
+        if amount > current_outstanding:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Amount NPR {amount:,.0f} exceeds the outstanding balance of NPR {current_outstanding:,.0f}.",
+            )
+
+        outstanding_after = max(0.0, current_outstanding - amount)
 
         collection = Collection(
             receipt_id=receipt_id,
@@ -103,6 +131,10 @@ async def create_collection(
             ).model_dump(),
             timestamp=int(time.time()),
         )
+    except HTTPException:
+        # Validation rejections (overpayment cap, zero balance, missing client) must
+        # reach the client with their real status + message, not be masked as a 500.
+        raise
     except Exception as e:
         logger.error(f"Create collection error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Collection creation failed")

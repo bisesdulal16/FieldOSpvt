@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
@@ -75,6 +75,7 @@ export default function DueCollectionsScreen() {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<TaskAssignment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadTasks = useCallback(async () => {
     try {
@@ -96,7 +97,7 @@ export default function DueCollectionsScreen() {
   const totalPending = tasks.reduce((sum, t) => sum + (t.amount || 0), 0);
   console.log('[Tasks] loaded', clientCards.length, 'valid tasks from', tasks.length, 'raw');
 
-  const filteredClients = activeFilter === 'all'
+  const byFilter = activeFilter === 'all'
     ? clientCards
     : clientCards.filter(c => {
         if (activeFilter === 'overdue') return c.status === 'overdue';
@@ -106,6 +107,14 @@ export default function DueCollectionsScreen() {
         if (activeFilter === 'sync') return false;
         return true;
       });
+
+  // Text search on top of the active filter — match client name or member ID.
+  const q = searchQuery.trim().toLowerCase();
+  const filteredClients = q
+    ? byFilter.filter(c =>
+        c.name.toLowerCase().includes(q) || String(c.memberId).toLowerCase().includes(q)
+      )
+    : byFilter;
 
   return (
     <View style={styles.container}>
@@ -126,7 +135,22 @@ export default function DueCollectionsScreen() {
 
           <View style={styles.searchBar}>
             <Ionicons name="search" size={14} color={colors.gray400} />
-            <Text style={styles.searchPlaceholder}>{t('searchClients')}</Text>
+            <TextInput
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={t('searchClients')}
+              placeholderTextColor={colors.gray400}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close-circle" size={16} color={colors.gray400} />
+              </TouchableOpacity>
+            )}
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
@@ -168,7 +192,7 @@ export default function DueCollectionsScreen() {
                   const raw = t0 as any;
                   const due = typeof (t0.amount ?? raw.amount) === 'number' ? (t0.amount ?? raw.amount) : Number(raw.amount ?? 0);
                   console.log('[Tasks] AI card action, first task clientName:', t0?.clientName || raw?.client_name || 'N/A');
-                  setSelectedClient({ id: String(t0.clientId), name: t0.clientName || raw.client_name, memberId: t0.clientMemberId || raw.member_id, clientId: t0.clientId, taskId: t0.id, dueAmount: due, outstandingBalance: due * 8 });
+                  setSelectedClient({ id: String(t0.clientId), name: t0.clientName || raw.client_name, memberId: t0.clientMemberId || raw.member_id, clientId: t0.clientId, taskId: t0.id, dueAmount: due });
                   router.push('/client-detail');
                 }}
               />
@@ -178,16 +202,19 @@ export default function DueCollectionsScreen() {
               <ClientTaskCard
                 key={`${client._task?.id || 'unknown'}-${client.memberId || 'unknown'}`}
                 {...client}
+                clientId={client._task?.clientId}
+                taskId={client._task?.id}
+                dueValue={client._dueAmt}
                 onStartVisit={() => {
                   const raw = client._task as any;
                   const due = typeof (client._task?.amount ?? raw.amount) === 'number' ? (client._task?.amount ?? raw.amount) : Number(raw.amount ?? 0);
-                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due, outstandingBalance: due * 8 });
+                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due });
                   router.push('/visit-checkin');
                 }}
                 onCollect={() => {
                   const raw = client._task as any;
                   const due = typeof (client._task?.amount ?? raw.amount) === 'number' ? (client._task?.amount ?? raw.amount) : Number(raw.amount ?? 0);
-                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due, outstandingBalance: due * 8 });
+                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due });
                   router.push('/record-collection');
                 }}
               />
@@ -216,7 +243,7 @@ const styles = StyleSheet.create({
   divider: { width: 1, height: 32, backgroundColor: colors.gray200 },
   totalCount: { fontSize: fontSize['4xl'], fontWeight: 'bold', color: colors.gray800 },
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: borderRadius.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.gray200, backgroundColor: colors.gray50, marginBottom: spacing.md },
-  searchPlaceholder: { fontSize: fontSize.md, color: colors.gray400, flex: 1 },
+  searchInput: { fontSize: fontSize.md, color: colors.gray800, flex: 1, padding: 0, height: 22 },
   filterRow: { marginBottom: spacing.xs },
   registerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.sm, paddingVertical: spacing.sm, borderRadius: borderRadius.lg, backgroundColor: colors.navy },
   registerBtnText: { fontSize: fontSize.base, fontWeight: '600', color: colors.white },

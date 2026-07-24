@@ -8,10 +8,11 @@ from app.models.user import User
 from app.schemas.promise import PromiseToPayCreate
 from app.schemas.common import ApiResponse
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/promise-to-pay", tags=["Promise to Pay"])
+router = APIRouter(prefix="/promise-to-pay", tags=["Promise to Pay"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 @router.post("/", response_model=ApiResponse)

@@ -1,13 +1,37 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { FaceVerificationModal } from '../components/fieldos/FaceVerificationModal';
 import { OnDeviceLLMProvider } from '../components/OnDeviceLLMProvider';
 import { useInitDB } from '../hooks/useInitDB';
+import { runSync } from '../services/syncService';
+
+// Auto-drain the offline queue whenever the app comes to the foreground. Field data
+// (visits/collections) previously only reached the backend when the officer manually
+// tapped "Sync", so anything they forgot to sync never showed on the manager dashboard
+// ("visits completed: 0"). Throttled so rapid foreground toggles don't spam the server.
+function useForegroundAutoSync() {
+  const lastSyncRef = useRef(0);
+  useEffect(() => {
+    const trySync = () => {
+      const now = Date.now();
+      if (now - lastSyncRef.current < 15000) return; // at most once per 15s
+      lastSyncRef.current = now;
+      runSync().catch(() => { /* stays queued, retries next foreground */ });
+    };
+    trySync(); // once on mount
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') trySync();
+    });
+    return () => sub.remove();
+  }, []);
+}
 
 export default function RootLayout() {
   const { isReady } = useInitDB();
+  useForegroundAutoSync();
 
   // While DB initializes, render nothing (fast — takes <100ms)
   if (!isReady) {

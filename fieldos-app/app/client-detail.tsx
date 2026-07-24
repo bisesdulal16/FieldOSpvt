@@ -13,6 +13,7 @@ import { SecondaryButton } from '../components/fieldos/SecondaryButton';
 import { PrivacyNoteCard } from '../components/fieldos/PrivacyNoteCard';
 import { useTranslation } from '../i18n';
 import { getClientKycStatus } from '../services';
+import { fetchClientDetail } from '../services/clientService';
 import type { KycDocumentType, KycDocument } from '../db/repositories/kycRepo';
 
 // ─── KYC type config for client detail ────────────────────────
@@ -35,10 +36,10 @@ function getKycStatusVariant(status: string): 'verified' | 'sync' | 'warning' | 
 }
 
 export default function ClientDetailScreen() {
-  const { selectedClient } = useFieldOSStore();
+  const { selectedClient, setSelectedClient } = useFieldOSStore();
   const router = useRouter();
   const { t } = useTranslation();
-  const client = selectedClient || { id: '1', name: 'Sunita Kumari Chaudhary', memberId: 'M-1042' };
+  const client = selectedClient || { id: '', name: '', memberId: '' };
   const clientId = Number(client.id) || 1;
   const initials = (client.name || '').split(' ').map(n => n[0]).slice(0, 2).join('');
 
@@ -47,6 +48,39 @@ export default function ClientDetailScreen() {
   const [kycSummary, setKycSummary] = useState<Record<KycDocumentType, KycDocument | null>>({} as any);
   const [kycLoading, setKycLoading] = useState(true);
   const [lastPayment, setLastPayment] = useState<{ amount: number; at: string } | null>(null);
+
+  // Authoritative loan figures from the backend (single source of truth). The store's
+  // selectedClient can hold a stale/partial object (e.g. arriving from a task), so we
+  // fetch the real due/outstanding on focus and mirror them back into the store so the
+  // Collect screen inherits the same numbers. No hardcoded fallbacks.
+  const [liveDue, setLiveDue] = useState<number | null>(null);
+  const [liveOutstanding, setLiveOutstanding] = useState<number | null>(null);
+  const [apiHistory, setApiHistory] = useState<{ date: string; action: string; amount: string }[] | null>(null);
+
+  const loadClientDetail = useCallback(async () => {
+    if (!numericClientId) return;
+    try {
+      const res: any = await fetchClientDetail(numericClientId);
+      const d = res?.data ?? res;
+      if (!d) return;
+      const due = Number(d.due_amount ?? d.dueAmount ?? d.loanAccount?.installmentAmount ?? 0);
+      const out = Number(d.outstanding_balance ?? d.outstandingBalance ?? d.loanAccount?.outstandingBalance ?? 0);
+      setLiveDue(due);
+      setLiveOutstanding(out);
+      // Keep the store in sync so downstream screens (Collect) use the fresh numbers.
+      setSelectedClient({ ...(selectedClient as any), dueAmount: due, outstandingBalance: out, clientId: numericClientId });
+      const rows = d.recent_collections ?? d.visitHistory ?? [];
+      if (Array.isArray(rows) && rows.length) {
+        setApiHistory(rows.map((r: any) => ({
+          date: String(r.collected_at ?? r.date ?? '').slice(0, 10) || '—',
+          action: r.amount != null ? t('collection') : t('visit'),
+          amount: r.amount != null ? `NPR ${Number(r.amount).toLocaleString()}` : t('followUp'),
+        })));
+      } else {
+        setApiHistory([]);
+      }
+    } catch { /* offline-first: keep whatever the store had */ }
+  }, [numericClientId]);
 
   const loadLastPayment = useCallback(async () => {
     try {
@@ -69,9 +103,10 @@ export default function ClientDetailScreen() {
 
   useEffect(() => { loadKyc(); }, [loadKyc]);
 
-  // Refresh KYC + last payment when screen comes back into focus
+  // Refresh KYC + last payment + live loan figures when screen comes back into focus
+  // (so returning from a collection shows the reduced balance immediately).
   useFocusEffect(
-    useCallback(() => { loadKyc(); loadLastPayment(); }, [loadKyc, loadLastPayment])
+    useCallback(() => { loadKyc(); loadLastPayment(); loadClientDetail(); }, [loadKyc, loadLastPayment, loadClientDetail])
   );
 
   const lastPaymentLabel = (() => {
@@ -84,11 +119,12 @@ export default function ClientDetailScreen() {
   const completedKyc = KYC_TYPES.filter(dt => kycSummary[dt.type]).length;
   const totalKyc = KYC_TYPES.length;
 
-  const history = [
-    { date: t('historyJan29'), action: t('collection'), amount: 'NPR 2,500' },
-    { date: t('historyJan22'), action: t('visit'), amount: t('followUp') },
-    { date: t('historyJan15'), action: t('collection'), amount: 'NPR 2,500' },
-  ];
+  // Real payment history from the backend; empty array = "no history yet" (no fake rows).
+  const history = apiHistory ?? [];
+
+  // Live figures win; fall back to the store only while the first fetch is in flight.
+  const displayDue = liveDue ?? Number(selectedClient?.dueAmount) ?? 0;
+  const displayOutstanding = liveOutstanding ?? Number(selectedClient?.outstandingBalance) ?? 0;
 
   return (
     <View style={styles.container}>
@@ -114,8 +150,8 @@ export default function ClientDetailScreen() {
         {/* Loan summary */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{t('loanSummary')}</Text>
-          <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('dueAmount')}</Text><Text style={styles.loanDue}>NPR {(selectedClient?.dueAmount || 5500).toLocaleString()}</Text></View>
-          <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('outstandingBalance')}</Text><Text style={styles.loanValue}>NPR {(selectedClient?.outstandingBalance || 45000).toLocaleString()}</Text></View>
+          <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('dueAmount')}</Text><Text style={styles.loanDue}>NPR {displayDue.toLocaleString()}</Text></View>
+          <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('outstandingBalance')}</Text><Text style={styles.loanValue}>NPR {displayOutstanding.toLocaleString()}</Text></View>
           <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('lastPayment')}</Text><Text style={styles.loanValue}>{lastPaymentLabel}</Text></View>
           <View style={styles.loanRow}><Text style={styles.loanLabel}>{t('nextInstallment')}</Text><Text style={styles.loanValue}>{t('today')}</Text></View>
           <View style={styles.divider} />
@@ -183,6 +219,9 @@ export default function ClientDetailScreen() {
         {/* History */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{t('history')}</Text>
+          {history.length === 0 && (
+            <Text style={styles.historyDate}>{t('noHistoryYet')}</Text>
+          )}
           {history.map((item, i) => (
             <View key={i} style={styles.historyRow}>
               <View style={styles.historyIcon}><Ionicons name={item.action === t('collection') ? 'wallet-outline' : 'location-outline'} size={14} color={colors.navy} /></View>

@@ -12,13 +12,14 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedResponse
 from app.schemas.loan import BorrowerCreate
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/clients",
     tags=["Clients"],
-    dependencies=[Depends(get_current_user)],  # all client data requires a valid token
+    # all client data requires a valid token AND financial-data access (walls off admin_it)
+    dependencies=[Depends(require_financial_access)],
 )
 
 
@@ -82,6 +83,7 @@ def _client_to_dict(client: Client) -> dict:
 
 
 @router.get("/", response_model=PaginatedResponse)
+@router.get("", response_model=PaginatedResponse, include_in_schema=False)
 async def get_clients(
     search: str | None = Query(None, description="Search by name or member_id"),
     center_id: str | None = Query(None, description="Filter by center"),
@@ -89,9 +91,21 @@ async def get_clients(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         query = select(Client)
+
+        # Officer-scope: a field officer sees only their OWN book of business
+        # (clients they have a task assignment for). Managers/admins see all.
+        # Without this, the client picker and search leak every officer's
+        # borrowers onto one shared device.
+        if current_user.role == "field_officer":
+            from app.models.task import TaskAssignment
+            own_client_ids = select(TaskAssignment.client_id).where(
+                TaskAssignment.user_id == current_user.id
+            )
+            query = query.where(Client.id.in_(own_client_ids))
 
         if search:
             query = query.where(

@@ -34,6 +34,12 @@ async def bootstrap(
         if not user or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
+        # Financial-data wall (§8-C): admin_it administers the system but must not
+        # pull the officer bootstrap (clients + tasks + financial state).
+        if getattr(user, "department", None) == "admin_it":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="admin_it accounts cannot access field/financial data.")
+
         # Get branch
         branch = None
         if user.branch_id:

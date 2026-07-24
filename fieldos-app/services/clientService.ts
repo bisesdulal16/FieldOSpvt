@@ -7,6 +7,7 @@
 
 import { getConfig } from './apiClient';
 import { searchClients } from '../db/repositories/clientsRepo';
+import { getSetting, setSetting } from '../db/repositories/settingsRepo';
 import type { ClientSummary, ClientDetail, ApiResponse } from '../types/api';
 
 // ─── Mock Data ───────────────────────────────────────────────────
@@ -33,12 +34,26 @@ export async function fetchClients(): Promise<ApiResponse<ClientSummary[]>> {
     return { success: true, data: MOCK_CLIENTS, timestamp: new Date().toISOString() };
   }
 
-  // Real API call
+  // Real API call — cache per officer so the client picker works OFFLINE too.
   const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-  const response = await fetch(`${apiUrl}/clients`, {
-    headers: { 'Authorization': `Bearer ${require('./apiClient').getAccessToken()}` },
-  });
-  return await response.json();
+  const { getAccessToken, getCurrentStaffId } = require('./apiClient');
+  const cacheKey = `cached_clients:${getCurrentStaffId() || 'me'}`;
+  try {
+    const response = await fetch(`${apiUrl}/clients`, {
+      headers: { 'Authorization': `Bearer ${getAccessToken()}` },
+    });
+    const json = await response.json();
+    if (json?.success && Array.isArray(json.data)) {
+      try { await setSetting(cacheKey, JSON.stringify(json.data), 'string'); } catch {}
+    }
+    return json;
+  } catch {
+    try {
+      const cached = await getSetting(cacheKey);
+      if (cached) return { success: true, data: JSON.parse(cached), timestamp: new Date().toISOString() };
+    } catch { /* no cache */ }
+    return { success: false, data: [], timestamp: new Date().toISOString() };
+  }
 }
 
 /**
@@ -113,17 +128,12 @@ export async function searchLocalClients(query: string): Promise<ClientSummary[]
     );
   }
 
-  // Search local DB
+  // Search local DB — never fall back to mock clients (would show fake borrowers).
   try {
     const dbClients = await searchClients(query);
     return dbClients.map(mapDbClient);
   } catch {
-    if (!query.trim()) return MOCK_CLIENTS;
-    const lowerQuery = query.toLowerCase();
-    return MOCK_CLIENTS.filter(c =>
-      c.name.toLowerCase().includes(lowerQuery) ||
-      c.memberId.toLowerCase().includes(lowerQuery)
-    );
+    return [];
   }
 }
 

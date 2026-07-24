@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, update
 
 from app.database import get_db
-from app.deps.auth_deps import require_manager_or_admin
+from app.deps.auth_deps import require_manager_or_admin, require_financial_access
 from app.models.user import User
 from app.models.client import Client
 from app.models.collection import Collection
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/cbs",
     tags=["CBS Integration"],
-    dependencies=[Depends(require_manager_or_admin)],
+    dependencies=[Depends(require_manager_or_admin), Depends(require_financial_access)],
 )
 
 

@@ -9,10 +9,11 @@ from app.models.user import User
 from app.schemas.eod import EODCreate
 from app.schemas.common import ApiResponse
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user
+from app.deps.auth_deps import get_current_user, require_financial_access
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/end-of-day", tags=["End of Day"])
+router = APIRouter(prefix="/end-of-day", tags=["End of Day"],
+                   dependencies=[Depends(require_financial_access)])
 
 
 @router.post("/", response_model=ApiResponse)
