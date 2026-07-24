@@ -192,7 +192,7 @@ export default function DueCollectionsScreen() {
                   const raw = t0 as any;
                   const due = typeof (t0.amount ?? raw.amount) === 'number' ? (t0.amount ?? raw.amount) : Number(raw.amount ?? 0);
                   console.log('[Tasks] AI card action, first task clientName:', t0?.clientName || raw?.client_name || 'N/A');
-                  setSelectedClient({ id: String(t0.clientId), name: t0.clientName || raw.client_name, memberId: t0.clientMemberId || raw.member_id, clientId: t0.clientId, taskId: t0.id, dueAmount: due, outstandingBalance: due * 8 });
+                  setSelectedClient({ id: String(t0.clientId), name: t0.clientName || raw.client_name, memberId: t0.clientMemberId || raw.member_id, clientId: t0.clientId, taskId: t0.id, dueAmount: due });
                   router.push('/client-detail');
                 }}
               />
@@ -202,16 +202,19 @@ export default function DueCollectionsScreen() {
               <ClientTaskCard
                 key={`${client._task?.id || 'unknown'}-${client.memberId || 'unknown'}`}
                 {...client}
+                clientId={client._task?.clientId}
+                taskId={client._task?.id}
+                dueValue={client._dueAmt}
                 onStartVisit={() => {
                   const raw = client._task as any;
                   const due = typeof (client._task?.amount ?? raw.amount) === 'number' ? (client._task?.amount ?? raw.amount) : Number(raw.amount ?? 0);
-                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due, outstandingBalance: due * 8 });
+                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due });
                   router.push('/visit-checkin');
                 }}
                 onCollect={() => {
                   const raw = client._task as any;
                   const due = typeof (client._task?.amount ?? raw.amount) === 'number' ? (client._task?.amount ?? raw.amount) : Number(raw.amount ?? 0);
-                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due, outstandingBalance: due * 8 });
+                  setSelectedClient({ id: client.memberId, name: client.name, memberId: client.memberId, clientId: client._task?.clientId, taskId: client._task?.id, dueAmount: due });
                   router.push('/record-collection');
                 }}
               />

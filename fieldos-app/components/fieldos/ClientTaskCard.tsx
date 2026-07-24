@@ -27,6 +27,12 @@ interface ClientTaskCardProps {
   reason: string;
   onStartVisit?: () => void;
   onCollect?: () => void;
+  // Task metadata used to select the correct client on card tap. Without the
+  // numeric clientId, client-detail's `Number(id) || 1` fallback silently loads
+  // client 1 (Sita) and every downstream screen inherits the wrong numbers.
+  clientId?: number;
+  taskId?: number;
+  dueValue?: number;
 }
 
 export function ClientTaskCard({
@@ -40,6 +46,9 @@ export function ClientTaskCard({
   reason,
   onStartVisit,
   onCollect,
+  clientId,
+  taskId,
+  dueValue,
 }: ClientTaskCardProps) {
   const router = useRouter();
   const { t } = useTranslation();
@@ -51,7 +60,17 @@ export function ClientTaskCard({
   const safeMemberId = memberId || '—';
 
   const handleCardPress = () => {
-    setSelectedClient({ id: safeMemberId, name: safeName, memberId: safeMemberId });
+    // Carry the numeric clientId so client-detail fetches the RIGHT client's
+    // authoritative due/outstanding instead of falling back to client 1. Leave
+    // outstanding unset — client-detail/collect fill it from the backend on focus.
+    setSelectedClient({
+      id: safeMemberId,
+      name: safeName,
+      memberId: safeMemberId,
+      clientId,
+      taskId,
+      dueAmount: dueValue,
+    });
     router.push('/client-detail');
   };
 

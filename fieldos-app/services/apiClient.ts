@@ -246,6 +246,19 @@ async function tryRefreshToken(): Promise<boolean> {
   return refreshPromise;
 }
 
+/**
+ * Refresh the access token and return the new one, or null if refresh failed.
+ * Shares the single-flight `tryRefreshToken` mutex so concurrent callers (e.g. the
+ * offline-sync push, which uses a raw fetch outside `request`) don't stampede the
+ * refresh endpoint. Used by syncService to recover from a 401 mid-drain instead of
+ * stalling the queue on a stale in-memory token.
+ */
+export async function refreshAccessToken(): Promise<string | null> {
+  if (!_refreshToken) return null;
+  const ok = await tryRefreshToken();
+  return ok ? _accessToken : null;
+}
+
 // ─── Convenience Methods ─────────────────────────────────────────
 
 export const apiClient = {
