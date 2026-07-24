@@ -151,9 +151,15 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
   resetDay: async () => {
     set({ dayStarted: false, dayVerifiedAt: null });
     // Durably end the day so it can't restore on re-login/offline reopen.
-    // (restoreDayForOfficer + hydrateFromDb both gate on day_started === 'true'.)
+    // Belt-and-suspenders: we flip day_started to 'false' AND wipe the start
+    // markers, so there is literally nothing left for restoreDayForOfficer /
+    // hydrateFromDb to restore — even if the eod_ended_staff guard fails to
+    // match (e.g. a staffId case/format mismatch). This is the root cause of
+    // the reported "ended the day, logged back in, still active" bug.
     try {
       await setSetting('day_started', 'false', 'boolean');
+      await setSetting('day_started_at', '', 'string');
+      await setSetting('day_started_staff', '', 'string');
       const staffId = get().currentStaffId;
       if (staffId) await setSetting('eod_ended_staff', staffId, 'string');
       await setSetting('eod_ended_at', new Date().toISOString(), 'string');
@@ -384,7 +390,12 @@ export const useFieldOSStore = create<FieldOSState>((set, get) => ({
       const dayStarted = await getSetting('day_started');
       if (dayStarted === 'true') {
         const dayStartedAt = await getSetting('day_started_at');
-        if (dayStartedAt) {
+        if (!dayStartedAt) {
+          // Flag says "true" but the start marker was wiped (EOD) — normalize the
+          // flag so a stale 'true' can never keep the day active. Defensive against
+          // the "day won't end" bug.
+          await setSetting('day_started', 'false', 'boolean');
+        } else if (dayStartedAt) {
           // Check if it's the same day
           const startedDate = new Date(dayStartedAt);
           const today = new Date();
