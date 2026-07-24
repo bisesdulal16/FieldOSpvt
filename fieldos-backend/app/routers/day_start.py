@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.models.branch import Branch
@@ -59,7 +60,9 @@ async def start_day(
         branch = (await db.execute(select(Branch).where(Branch.id == current_user.branch_id))).scalar_one_or_none()
 
     office_ip = (branch.office_ip if branch else None) or ""
-    gate_enabled = bool(office_ip.strip())
+    # Master switch (config): OFF for the pilot so officers can start their day from
+    # any network. Only when explicitly enabled does the per-branch office_ip apply.
+    gate_enabled = settings.DAY_START_IP_GATE and bool(office_ip.strip())
     if gate_enabled:
         allowed = {ip.strip() for ip in office_ip.split(",") if ip.strip()}
         ip_ok = source_ip in allowed
