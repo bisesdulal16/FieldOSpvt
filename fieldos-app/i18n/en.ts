@@ -88,6 +88,8 @@ const en = {
   collectionAmountRequired: 'Collection amount is required',
   amountMustBeNumber: 'Amount must be a valid number',
   amountMustBeGreaterThanZero: 'Amount must be greater than zero',
+  amountExceedsOutstanding: 'Amount cannot exceed the outstanding balance of NPR {amount}',
+  noOutstandingToCollect: 'This client has no outstanding balance to collect',
   cancel: 'Cancel',
 
   // ─── Center Meeting ─────────────────────────────────────────
@@ -105,6 +107,7 @@ const en = {
   expected: 'Expected',
   received: 'Received',
   followUp: 'Follow-up',
+  noHistoryYet: 'No activity yet',
   allPresent: 'All Present',
   memberAttendance: 'Member Attendance',
   completeMeeting: 'Complete Meeting',

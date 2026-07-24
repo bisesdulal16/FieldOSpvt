@@ -28,7 +28,12 @@ def _task_to_dict(task: TaskAssignment, client: Client | None = None) -> dict:
         "status": task.status,
         "priority": task.priority,
         "reason": task.reason,
-        "amount": task.amount,
+        # The task feed shows the client's CURRENT due (single source of truth), so it
+        # matches the profile/collect screens and drops as collections reduce the balance.
+        # Falls back to the task's frozen amount only when the client isn't loaded.
+        "amount": (float(client.due_amount) if client and client.due_amount is not None else task.amount),
+        "due_amount": (float(client.due_amount) if client else None),
+        "outstanding_balance": (float(client.outstanding_balance) if client else None),
         "is_completed": task.is_completed,
         "completed_at": task.completed_at,
     }

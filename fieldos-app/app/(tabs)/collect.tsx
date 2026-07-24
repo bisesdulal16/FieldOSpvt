@@ -10,7 +10,7 @@ import { StatusChip } from '../../components/fieldos/StatusChip';
 import { PrimaryButton } from '../../components/fieldos/PrimaryButton';
 import { ValidationError } from '../../components/fieldos/ValidationError';
 import { recordCollection } from '../../services/collectionService';
-import { fetchClients } from '../../services/clientService';
+import { fetchClients, fetchClientDetail } from '../../services/clientService';
 import { useTranslation } from '../../i18n';
 
 const PAYMENT_METHODS = [
@@ -78,6 +78,28 @@ export default function RecordCollectionScreen() {
     if (selectedClient && gpsStatus === 'idle') captureGps();
   }, [selectedClient, gpsStatus, captureGps]);
 
+  // Refresh the client's real due/outstanding from the backend as soon as we land here
+  // with a client selected. The store object can be stale/partial (arriving from a task
+  // showed due=0), which both mis-displayed the amount and made the overpayment cap
+  // read the wrong ceiling. Runs once per client id.
+  useEffect(() => {
+    const cid = (selectedClient as any)?.clientId ?? Number(selectedClient?.id);
+    if (!cid) return;
+    let active = true;
+    (async () => {
+      try {
+        const res: any = await fetchClientDetail(cid);
+        const d = res?.data ?? res;
+        if (!active || !d) return;
+        const freshDue = Number(d.due_amount ?? d.dueAmount ?? d.loanAccount?.installmentAmount ?? 0);
+        const freshOut = Number(d.outstanding_balance ?? d.outstandingBalance ?? d.loanAccount?.outstandingBalance ?? 0);
+        setSelectedClient({ ...(selectedClient as any), dueAmount: freshDue, outstandingBalance: freshOut, clientId: cid });
+      } catch { /* offline: keep the store values */ }
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [(selectedClient as any)?.clientId, selectedClient?.id]);
+
   const pickClient = (c: any) => {
     const due = Number(c.due_amount ?? c.dueAmount ?? 0);
     setSelectedClient({
@@ -119,9 +141,16 @@ export default function RecordCollectionScreen() {
       return;
     }
 
-    if (isHighValue) {
-      // Show warning but still allow save
-      // The existing high-value warning card already shows
+    // Hard cap: a collection can never exceed the client's outstanding balance. This
+    // blocks the "210,000 against a 2,100 due" case on the device. The server enforces
+    // the same cap, but catching it here gives an immediate, clear message.
+    if (outstanding > 0 && amt > outstanding) {
+      setError(t('amountExceedsOutstanding').replace('{amount}', outstanding.toLocaleString()));
+      return;
+    }
+    if (outstanding <= 0) {
+      setError(t('noOutstandingToCollect'));
+      return;
     }
 
     setSaving(true);
@@ -138,9 +167,9 @@ export default function RecordCollectionScreen() {
       return;
     }
 
-    const due = selectedClient?.dueAmount || 5500;
+    const due = Number(selectedClient?.dueAmount) || 0;
     const remainingDue = Math.max(due - amt, 0);
-    const remainingOutstanding = Math.max((selectedClient?.outstandingBalance || 0) - amt, 0);
+    const remainingOutstanding = Math.max(outstanding - amt, 0);
 
     console.log('[Collect] payload to recordCollection:', {
       clientId: numericClientId,

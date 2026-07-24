@@ -88,6 +88,8 @@ const ne = {
   collectionAmountRequired: 'संकलन रकम आवश्यक छ',
   amountMustBeNumber: 'संकलन रकम अंक हुनुपर्छ',
   amountMustBeGreaterThanZero: 'संकलन रकम शून्य भन्दा बढी हुनुपर्छ',
+  amountExceedsOutstanding: 'रकम बाँकी रकम NPR {amount} भन्दा बढी हुन सक्दैन',
+  noOutstandingToCollect: 'यो ग्राहकको कुनै बाँकी रकम छैन',
   cancel: 'रद्द गर्नुहोस्',
 
   // ─── Center Meeting ─────────────────────────────────────────
@@ -105,6 +107,7 @@ const ne = {
   expected: 'संकलन अपेक्षित',
   received: 'संकलन प्राप्त',
   followUp: 'फलो-अप',
+  noHistoryYet: 'हालसम्म कुनै गतिविधि छैन',
   allPresent: 'सबै उपस्थित',
   memberAttendance: 'सदस्य उपस्थिति',
   completeMeeting: 'बैठक पूरा गर्नुहोस्',

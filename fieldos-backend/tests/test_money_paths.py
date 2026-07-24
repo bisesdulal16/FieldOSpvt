@@ -57,6 +57,15 @@ async def test_collection_computes_balance_server_side(client: AsyncClient):
     assert resp.json()["data"]["outstanding_after"] == 42500.0
 
 
+async def test_collection_amount_capped_at_outstanding(client: AsyncClient):
+    # Client 1 outstanding is 45000; a wildly-over amount (the real 210k fat-finger) is rejected.
+    token = await login(client, "FO-208")
+    resp = await client.post("/api/v1/collections/", headers=auth(token),
+                             json={"client_id": 1, "amount": 210000, "payment_method": "cash"})
+    assert resp.status_code == 400
+    assert "exceeds the outstanding" in resp.json()["detail"].lower()
+
+
 # ── The anti-fraud SMS receipt fires ─────────────────────────────────────
 
 async def test_collection_sends_client_receipt(client: AsyncClient):
@@ -101,14 +110,27 @@ async def test_manager_can_approve_loan(client: AsyncClient):
 
 # ── Day-start office-network gate ────────────────────────────────────────
 
-async def test_day_start_blocked_off_office_network(client: AsyncClient):
+async def test_day_start_gate_off_by_default_allows_any_network(client: AsyncClient):
+    # Pilot default: DAY_START_IP_GATE is OFF, so an officer can start the day from any
+    # network even though the test branch has office_ip=127.0.0.1.
     token = await login(client, "FO-208")
-    # Branch office_ip is 127.0.0.1; a spoofed forwarded IP must be blocked.
+    resp = await client.post("/api/v1/day-start/", headers={**auth(token), "X-Forwarded-For": "202.51.1.99"}, json={})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["gate_enabled"] is False
+
+
+async def test_day_start_blocked_off_office_network(client: AsyncClient, monkeypatch):
+    # With the master switch ON, a spoofed off-network forwarded IP must be blocked.
+    from app.routers import day_start as day_start_router
+    monkeypatch.setattr(day_start_router.settings, "DAY_START_IP_GATE", True)
+    token = await login(client, "FO-208")
     resp = await client.post("/api/v1/day-start/", headers={**auth(token), "X-Forwarded-For": "202.51.1.99"}, json={})
     assert resp.status_code == 403
 
 
-async def test_day_start_allowed_on_office_network(client: AsyncClient):
+async def test_day_start_allowed_on_office_network(client: AsyncClient, monkeypatch):
+    from app.routers import day_start as day_start_router
+    monkeypatch.setattr(day_start_router.settings, "DAY_START_IP_GATE", True)
     token = await login(client, "FO-208")
     resp = await client.post("/api/v1/day-start/", headers=auth(token), json={"selfie_data_uri": "data:image/png;base64,AAAA"})
     assert resp.status_code == 200
