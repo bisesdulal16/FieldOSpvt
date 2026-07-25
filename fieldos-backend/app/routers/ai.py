@@ -48,6 +48,7 @@ from app.models.sync_event import SyncEvent
 from app.models.task import TaskAssignment
 from app.models.cbs import CollectionEvent
 from app.schemas.common import ApiResponse
+from app.utils.nepal_time import today_nepal_str, days_ago_nepal_str
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -62,7 +63,9 @@ def _ts() -> int:
 
 
 def _today_str() -> str:
-    return str(date.today())
+    # Business "today" must be Nepal date — timestamps are stored in Asia/Kathmandu,
+    # so date.today() (server/UTC) would miss rows recorded around the day boundary.
+    return today_nepal_str()
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +327,7 @@ async def get_suggestions(
         )).scalars().all()
 
         # Recently visited client IDs (last 3 days)
-        three_days_ago = str(date.today() - timedelta(days=3))
+        three_days_ago = days_ago_nepal_str(3)
         recently_visited = set((await db.execute(
             select(VisitCheckin.client_id).where(VisitCheckin.checked_in_at >= three_days_ago)
         )).scalars().all())
@@ -582,22 +585,21 @@ async def get_eod_summary(
 
         summaries = []
         for officer in officers:
-            # Collections
+            # Collections — attribute by officer_id (always set from the authed token);
+            # task_id is NULL for Change-client / standalone actions, so a task-join drops them.
             coll_row = (await db.execute(
                 select(
                     func.count().label("cnt"),
                     func.coalesce(func.sum(Collection.amount), 0).label("total"),
                 )
                 .select_from(Collection)
-                .join(TaskAssignment, Collection.task_id == TaskAssignment.id)
-                .where(and_(TaskAssignment.user_id == officer.id, Collection.collected_at.like(f"{today}%")))
+                .where(and_(Collection.officer_id == officer.id, Collection.collected_at.like(f"{today}%")))
             )).one()
 
-            # Visits
+            # Visits — attribute by officer_id for the same reason.
             visit_count = (await db.execute(
                 select(func.count()).select_from(VisitCheckin)
-                .join(TaskAssignment, VisitCheckin.task_id == TaskAssignment.id)
-                .where(and_(TaskAssignment.user_id == officer.id, VisitCheckin.checked_in_at.like(f"{today}%")))
+                .where(and_(VisitCheckin.officer_id == officer.id, VisitCheckin.checked_in_at.like(f"{today}%")))
             )).scalar() or 0
 
             # Tasks

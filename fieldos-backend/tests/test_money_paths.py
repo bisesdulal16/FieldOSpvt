@@ -135,3 +135,30 @@ async def test_day_start_allowed_on_office_network(client: AsyncClient, monkeypa
     resp = await client.post("/api/v1/day-start/", headers=auth(token), json={"selfie_data_uri": "data:image/png;base64,AAAA"})
     assert resp.status_code == 200
     assert resp.json()["data"]["ip_verified"] is True
+
+
+# ── Officer attribution survives standalone (no task_id) actions ──────────
+# Regression for the pilot "manager saw visits_completed = 0" bug: Change-client /
+# standalone visits and collections carry no task_id, so any count that joins through
+# TaskAssignment.task_id drops them. Counts must attribute via officer_id (from the token).
+
+async def test_eod_summary_counts_visit_and_collection_without_task_id(client: AsyncClient):
+    token = await login(client, "FO-208")  # FO-208 is user id 1
+
+    # A standalone visit + collection — no task_id in either body.
+    vresp = await client.post("/api/v1/visit-checkins/", headers=auth(token),
+                              json={"client_id": 1, "gps_latitude": 27.69, "gps_longitude": 85.28,
+                                    "visit_purpose": "collection"})
+    assert vresp.status_code == 200
+    cresp = await client.post("/api/v1/collections/", headers=auth(token),
+                              json={"client_id": 1, "amount": 2500, "payment_method": "cash",
+                                    "gps_latitude": 27.69, "gps_longitude": 85.28})
+    assert cresp.status_code == 200
+
+    mtoken = await login(client, "BM-001")
+    summary = await client.get("/api/v1/manager/ai/eod-summary?officer_id=1", headers=auth(mtoken))
+    assert summary.status_code == 200
+    officers = summary.json()["data"]["summaries"]
+    fo = next(o for o in officers if o["officer_id"] == 1)
+    assert fo["visits_completed"] >= 1, "standalone visit must count toward the officer"
+    assert fo["collections_count"] >= 1, "standalone collection must count toward the officer"
