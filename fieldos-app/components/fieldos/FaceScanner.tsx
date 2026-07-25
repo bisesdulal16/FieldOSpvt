@@ -17,11 +17,27 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
 
-// Model lives on the homelab (or HF); loaded at runtime so a missing file never
-// breaks the JS bundle — same pattern as the on-device Gemma model.
+// The face model is BUNDLED in the APK (assets/models/mobilefacenet.tflite,
+// registered via metro.config.js) so clock-in needs NO network — this is the
+// fix for the pilot's "stuck on Loading face model…" hang when the homelab was
+// unreachable. The URL is kept only as a runtime fallback if the bundled asset
+// ever fails to resolve. require() is wrapped so a missing asset can't crash the
+// bundle (same safe-by-default posture as the native imports below).
+let BUNDLED_FACE_MODEL: any = null;
+try {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  BUNDLED_FACE_MODEL = require('../../assets/models/mobilefacenet.tflite');
+  /* eslint-enable @typescript-eslint/no-require-imports */
+} catch {
+  BUNDLED_FACE_MODEL = null;
+}
+
 const FACE_MODEL_URL =
   process.env.EXPO_PUBLIC_FACE_MODEL_URL ||
   'https://huggingface.co/thanhnew2001/mobilefacenet/resolve/main/mobilefacenet.tflite';
+
+// Prefer the bundled asset; fall back to the URL only if it didn't resolve.
+const FACE_MODEL_SOURCE: any = BUNDLED_FACE_MODEL ?? { url: FACE_MODEL_URL };
 
 // Input normalization: the served mobilefacenet.tflite (Sirius-AI/MobileFaceNet
 // export, input [1,112,112,3] float32) is trained with SIGNED [-1,1] preprocessing
@@ -113,9 +129,9 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
     trackingEnabled: false,
   });
 
-  // Load the embedding model at runtime from a URL (homelab or HF), pinned to the
-  // CPU delegate so it loads on low-end chipsets.
-  const tf = useTensorflowModel({ url: FACE_MODEL_URL }, FACE_DELEGATE);
+  // Load the embedding model — bundled asset when available (no network), else
+  // the URL fallback. Pinned to the CPU delegate so it loads on low-end chipsets.
+  const tf = useTensorflowModel(FACE_MODEL_SOURCE, FACE_DELEGATE);
   const model = tf.state === 'loaded' ? tf.model : null;
 
   // Liveness state machine, shared into the worklet.
@@ -131,7 +147,7 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
   useEffect(() => {
     if (!hasPermission) requestPermission();
     if (FACE_DEBUG) {
-      console.log(`[FaceScanner] model state=${tf.state} delegate=${FACE_DELEGATE} url=${FACE_MODEL_URL}`);
+      console.log(`[FaceScanner] model state=${tf.state} delegate=${FACE_DELEGATE} source=${BUNDLED_FACE_MODEL ? 'bundled-asset' : `url:${FACE_MODEL_URL}`}`);
     }
     if (tf.state === 'error') {
       // Surface the actual native error (delegate/parse/download) instead of a bare
