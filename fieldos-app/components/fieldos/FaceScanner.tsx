@@ -23,12 +23,27 @@ const FACE_MODEL_URL =
   process.env.EXPO_PUBLIC_FACE_MODEL_URL ||
   'https://huggingface.co/thanhnew2001/mobilefacenet/resolve/main/mobilefacenet.tflite';
 
-// Input normalization the model expects. Some MobileFaceNet exports want [-1,1]
-// ('signed', default), others [0,1] ('unit'). Switchable via env so it can be
-// tuned on real devices without a code change — the wrong choice makes embeddings
-// non-discriminative (everyone "matches"), which is the F4 false-accept symptom.
-const FACE_NORM = (process.env.EXPO_PUBLIC_FACE_NORM || 'signed').toLowerCase();
-const FACE_NORM_UNIT = FACE_NORM === 'unit'; // [0,1] instead of [-1,1] — primitive, safe to capture in the worklet
+// Input normalization: the served mobilefacenet.tflite (Sirius-AI/MobileFaceNet
+// export, input [1,112,112,3] float32) is trained with SIGNED [-1,1] preprocessing
+// = (px - 127.5) / 128. Feeding it [0,1] pushes every input off-distribution, the
+// embeddings collapse toward one direction, and cosine stays ~0.78+ for ANY two
+// faces — i.e. the pilot's "match 1.00 on a different face" false-accept.
+//
+// This was previously env-switchable (EXPO_PUBLIC_FACE_NORM) and eas.json shipped
+// 'unit' — the wrong value — which caused the false-accept. It is now PINNED to
+// signed in code so the model always gets its correct preprocessing. If you ever
+// swap to a model trained on [0,1], change this constant (and add a matching test).
+const FACE_NORM_UNIT = false; // pinned: signed [-1,1] — see note above
+
+// Log embedding/similarity diagnostics to Metro/logcat so the threshold can be
+// tuned on real officers + cameras during the pilot. Off unless explicitly enabled.
+const FACE_DEBUG = String(process.env.EXPO_PUBLIC_FACE_DEBUG).toLowerCase() === 'true';
+
+// Force the plain CPU (XNNPACK) delegate. On low-end Android like the Redmi 11s
+// (MediaTek) the GPU/NNAPI delegates fail to init on this model — which surfaced
+// as "phone doesn't support face model". CPU is slower per frame but the embedding
+// is one-shot, so it's the reliable choice. 'default' == CPU in fast-tflite.
+const FACE_DELEGATE = 'default' as const;
 
 // ─── Guarded native imports ──────────────────────────────────────
 let VisionCamera: any = null;
@@ -98,8 +113,9 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
     trackingEnabled: false,
   });
 
-  // Load the embedding model at runtime from a URL (homelab or HF).
-  const tf = useTensorflowModel({ url: FACE_MODEL_URL });
+  // Load the embedding model at runtime from a URL (homelab or HF), pinned to the
+  // CPU delegate so it loads on low-end chipsets.
+  const tf = useTensorflowModel({ url: FACE_MODEL_URL }, FACE_DELEGATE);
   const model = tf.state === 'loaded' ? tf.model : null;
 
   // Liveness state machine, shared into the worklet.
@@ -114,7 +130,16 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
 
   useEffect(() => {
     if (!hasPermission) requestPermission();
-    if (tf.state === 'error') onUnavailable('model');
+    if (FACE_DEBUG) {
+      console.log(`[FaceScanner] model state=${tf.state} delegate=${FACE_DELEGATE} url=${FACE_MODEL_URL}`);
+    }
+    if (tf.state === 'error') {
+      // Surface the actual native error (delegate/parse/download) instead of a bare
+      // "model unavailable" — this is what told the pilot "phone doesn't support model"
+      // with no way to know why.
+      console.warn('[FaceScanner] model load failed:', (tf as any).error);
+      onUnavailable('model');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPermission, tf.state]);
 
@@ -126,6 +151,13 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
   const emit = useRunOnJS((vec: number[]) => {
     if (emittedRef.current) return;
     emittedRef.current = true;
+    if (FACE_DEBUG) {
+      // Norm should be a stable positive number; a flat/near-zero vector or wildly
+      // varying norm means preprocessing is off. verifyEmbedding() logs the cosine.
+      let n = 0;
+      for (const x of vec) n += x * x;
+      console.log(`[FaceScanner] embedding dim=${vec.length} L2norm=${Math.sqrt(n).toFixed(4)} head=[${vec.slice(0, 4).map((x) => x.toFixed(3)).join(', ')}]`);
+    }
     onEmbedding(vec);
   }, [onEmbedding]);
 
@@ -172,7 +204,9 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
         pixelFormat: 'rgb',
         dataType: 'float32',
       });
-      // Normalise per EXPO_PUBLIC_FACE_NORM: 'unit' → [0,1], else 'signed' → [-1,1].
+      // Normalise to the model's expected range: signed [-1,1] = (px-127.5)/128.
+      // (FACE_NORM_UNIT is pinned false; the [0,1] branch is kept only for a future
+      //  model swap.)
       const input = new Float32Array(resized.length);
       if (FACE_NORM_UNIT) {
         for (let i = 0; i < resized.length; i++) input[i] = resized[i] / 255.0;

@@ -136,11 +136,22 @@ export interface FaceVerifyResult {
   reason?: 'no_enrollment' | 'below_threshold' | 'ok';
 }
 
+const FACE_DEBUG =
+  String(process.env.EXPO_PUBLIC_FACE_DEBUG).toLowerCase() === 'true';
+
 /** Compare a freshly-captured embedding to the enrolled template. */
 export async function verifyEmbedding(embedding: number[]): Promise<FaceVerifyResult> {
   const enrolled = await getEnrolledTemplate();
   if (!enrolled) return { verified: false, similarity: -1, reason: 'no_enrollment' };
   const similarity = cosineSimilarity(l2normalize(embedding), enrolled);
   const verified = similarity >= FACE_MATCH_THRESHOLD;
+  if (FACE_DEBUG) {
+    // The number to tune the threshold on: capture same-person and different-person
+    // scores on real officers/cameras. With correct (signed) preprocessing, expect
+    // same-person cosine > ~0.7 and cross-person < ~0.45.
+    console.log(
+      `[faceVerify] cosine=${similarity.toFixed(4)} threshold=${FACE_MATCH_THRESHOLD} → ${verified ? 'PASS' : 'FAIL'}`,
+    );
+  }
   return { verified, similarity, reason: verified ? 'ok' : 'below_threshold' };
 }
