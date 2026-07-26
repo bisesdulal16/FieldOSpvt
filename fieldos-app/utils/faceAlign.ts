@@ -44,6 +44,57 @@ export type Affine = [number, number, number, number, number, number];
  */
 export function similarityTransform(src: number[][], dst: number[][]): Affine {
   'worklet';
+
+  // NOTE: the SVD/eigen helpers are declared *inside* this function on purpose.
+  // The react-native-worklets-core Babel plugin only captures the closure at each
+  // worklet's definition site. A cross-module `'worklet'` helper referenced only
+  // from *within* another worklet (never named in the frame-processor closure)
+  // resolves to `undefined` in the worklet runtime → "undefined is not a function"
+  // the first time similarityTransform runs on a frame. Inlining them as local
+  // consts keeps everything in one captured closure. Do NOT hoist these back out.
+
+  /** Eigen-decomposition of a symmetric 2×2 [[a,b],[b,c]] → cos/sin of the rotation
+   *  to its eigenbasis and the two eigenvalues (l1 ≥ l2). */
+  const symEig2x2 = (a: number, b: number, c: number) => {
+    'worklet';
+    const tr = a + c;
+    const diff = a - c;
+    const disc = Math.sqrt(diff * diff + 4 * b * b);
+    const l1 = (tr + disc) / 2;
+    const l2 = (tr - disc) / 2;
+    let cs: number, sn: number;
+    if (Math.abs(b) < 1e-12) {
+      cs = 1; sn = 0; // already diagonal
+    } else {
+      const y = l1 - a;
+      const norm = Math.sqrt(b * b + y * y) || 1;
+      cs = b / norm;
+      sn = y / norm;
+    }
+    return { c: cs, s: sn, l1, l2 };
+  };
+
+  /** Analytic SVD of a 2×2 matrix [[a,b],[c,d]] → U, S(diag as [s0,s1]), V. */
+  const svd2x2 = (a: number, b: number, c: number, d: number) => {
+    'worklet';
+    // Eigen-decompose AᵀA to get V and singular values.
+    const ata00 = a * a + c * c;
+    const ata01 = a * b + c * d;
+    const ata11 = b * b + d * d;
+    const { c: vc, s: vs, l1, l2 } = symEig2x2(ata00, ata01, ata11);
+    const s0 = Math.sqrt(Math.max(l1, 0));
+    const s1 = Math.sqrt(Math.max(l2, 0));
+    // V columns are the eigenvectors: [[vc,-vs],[vs,vc]]
+    const Vm = [vc, -vs, vs, vc];
+    // U = A V Σ⁻¹  (column-wise); guard tiny singulars.
+    const inv0 = s0 > 1e-12 ? 1 / s0 : 0;
+    const inv1 = s1 > 1e-12 ? 1 / s1 : 0;
+    const av0x = a * Vm[0] + b * Vm[2], av0y = c * Vm[0] + d * Vm[2];
+    const av1x = a * Vm[1] + b * Vm[3], av1y = c * Vm[1] + d * Vm[3];
+    const Um = [av0x * inv0, av1x * inv1, av0y * inv0, av1y * inv1];
+    return { U: Um, S: [s0, s1], V: Vm };
+  };
+
   const n = src.length;
   // means
   let msx = 0, msy = 0, mdx = 0, mdy = 0;
@@ -87,55 +138,6 @@ export function similarityTransform(src: number[][], dst: number[][]): Affine {
   const tx = mdx - (a * msx + b * msy);
   const ty = mdy - (c * msx + d * msy);
   return [a, b, tx, c, d, ty];
-}
-
-/** Analytic SVD of a 2×2 matrix [[a,b],[c,d]] → U, S(diag as [s0,s1]), V. */
-function svd2x2(a: number, b: number, c: number, d: number): {
-  U: number[]; S: number[]; V: number[];
-} {
-  'worklet';
-  // Eigen-decompose AᵀA to get V and singular values.
-  const ata00 = a * a + c * c;
-  const ata01 = a * b + c * d;
-  const ata11 = b * b + d * d;
-  const { c: vc, s: vs, l1, l2 } = symEig2x2(ata00, ata01, ata11);
-  const s0 = Math.sqrt(Math.max(l1, 0));
-  const s1 = Math.sqrt(Math.max(l2, 0));
-  // V columns are the eigenvectors: [[vc,-vs],[vs,vc]]
-  const V = [vc, -vs, vs, vc];
-  // U = A V Σ⁻¹  (column-wise); guard tiny singulars.
-  const inv0 = s0 > 1e-12 ? 1 / s0 : 0;
-  const inv1 = s1 > 1e-12 ? 1 / s1 : 0;
-  // A·v0, A·v1
-  const av0x = a * V[0] + b * V[2], av0y = c * V[0] + d * V[2];
-  const av1x = a * V[1] + b * V[3], av1y = c * V[1] + d * V[3];
-  const U = [av0x * inv0, av1x * inv1, av0y * inv0, av1y * inv1];
-  return { U, S: [s0, s1], V };
-}
-
-/** Eigen-decomposition of a symmetric 2×2 [[a,b],[b,c]] → cos/sin of the rotation
- *  to its eigenbasis and the two eigenvalues (l1 ≥ l2). */
-function symEig2x2(a: number, b: number, c: number): {
-  c: number; s: number; l1: number; l2: number;
-} {
-  'worklet';
-  const tr = a + c;
-  const diff = a - c;
-  const disc = Math.sqrt(diff * diff + 4 * b * b);
-  const l1 = (tr + disc) / 2;
-  const l2 = (tr - disc) / 2;
-  // eigenvector for l1
-  let cs: number, sn: number;
-  if (Math.abs(b) < 1e-12) {
-    // already diagonal
-    cs = 1; sn = 0;
-  } else {
-    const y = l1 - a;
-    const norm = Math.sqrt(b * b + y * y) || 1;
-    cs = b / norm;
-    sn = y / norm;
-  }
-  return { c: cs, s: sn, l1, l2 };
 }
 
 /**
