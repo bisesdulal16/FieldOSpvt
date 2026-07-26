@@ -16,6 +16,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
+import { ARC_TEMPLATE_112, similarityTransform, warpToTemplate } from '../../utils/faceAlign';
 
 // The face model is BUNDLED in the APK (assets/models/mobilefacenet.tflite,
 // registered via metro.config.js) so clock-in needs NO network — this is the
@@ -60,6 +61,12 @@ const FACE_DEBUG = String(process.env.EXPO_PUBLIC_FACE_DEBUG).toLowerCase() === 
 // as "phone doesn't support face model". CPU is slower per frame but the embedding
 // is one-shot, so it's the reliable choice. 'default' == CPU in fast-tflite.
 const FACE_DELEGATE = 'default' as const;
+
+// Working size the full frame is downscaled to before the alignment warp. The 5
+// landmarks are scaled into this space and the warp samples from it. ~320px on the
+// long side keeps the face well-resolved for a 112 crop while keeping the JS warp
+// (one-shot, on capture only) cheap. Aspect ratio is preserved per-frame below.
+const ALIGN_WORK_MAX = 320;
 
 // ─── Guarded native imports ──────────────────────────────────────
 let VisionCamera: any = null;
@@ -123,7 +130,7 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
   const { resize } = useResizePlugin();
   const { detectFaces } = useFaceDetector({
     performanceMode: 'accurate',
-    landmarkMode: 'none',
+    landmarkMode: 'all', // needed for 5-point alignment (eyes/nose/mouth)
     classificationMode: 'all', // needed for eye-open probabilities (blink)
     contourMode: 'none',
     trackingEnabled: false,
@@ -205,29 +212,48 @@ function RealScanner({ mode, onEmbedding, onUnavailable, onCancel }: FaceScanner
     }
     // 3) Capture on a frontal, eyes-open frame.
     if (yaw < 12 && eyesOpen > 0.6) {
-      const b = f.bounds; // { x, y, width, height } in frame coords
-      // Expand + clamp the crop box a little around the face.
-      const pad = b.width * 0.15;
-      const x = Math.max(0, b.x - pad);
-      const y = Math.max(0, b.y - pad);
-      const w = Math.min(frame.width - x, b.width + pad * 2);
-      const h = Math.min(frame.height - y, b.height + pad * 2);
+      // ALIGNMENT (the false-accept fix): MobileFaceNet needs a landmark-aligned
+      // 112×112 crop, not a raw bounding-box crop. A loose bbox crop collapses the
+      // embedding space so two different people in the same pose score ~0.999. We
+      // warp the 5 detector landmarks onto the ArcFace template. Enroll AND verify
+      // run this same path, so their preprocessing matches (required for cosine).
+      const lm = f.landmarks;
+      if (
+        !lm || !lm.LEFT_EYE || !lm.RIGHT_EYE || !lm.NOSE_BASE ||
+        !lm.MOUTH_LEFT || !lm.MOUTH_RIGHT
+      ) {
+        // No landmarks this frame → skip rather than emit an unaligned (bad) crop.
+        reportStep('hold', true);
+        return;
+      }
 
-      // 112×112 RGB float — MobileFaceNet's expected input.
-      const resized = resize(frame, {
-        crop: { x, y, width: w, height: h },
-        scale: { width: 112, height: 112 },
+      // Downscale the whole frame to a bounded working buffer (aspect preserved).
+      const scaleF = ALIGN_WORK_MAX / Math.max(frame.width, frame.height);
+      const fw = Math.round(frame.width * scaleF);
+      const fh = Math.round(frame.height * scaleF);
+      const buf = resize(frame, {
+        scale: { width: fw, height: fh },
         pixelFormat: 'rgb',
-        dataType: 'float32',
+        dataType: 'uint8',
       });
-      // Normalise to the model's expected range: signed [-1,1] = (px-127.5)/128.
-      // (FACE_NORM_UNIT is pinned false; the [0,1] branch is kept only for a future
-      //  model swap.)
-      const input = new Float32Array(resized.length);
+
+      // Landmarks are in full-frame coords → scale into the working buffer.
+      const src = [
+        [lm.LEFT_EYE.x * scaleF, lm.LEFT_EYE.y * scaleF],
+        [lm.RIGHT_EYE.x * scaleF, lm.RIGHT_EYE.y * scaleF],
+        [lm.NOSE_BASE.x * scaleF, lm.NOSE_BASE.y * scaleF],
+        [lm.MOUTH_LEFT.x * scaleF, lm.MOUTH_LEFT.y * scaleF],
+        [lm.MOUTH_RIGHT.x * scaleF, lm.MOUTH_RIGHT.y * scaleF],
+      ];
+      const m = similarityTransform(src, ARC_TEMPLATE_112);
+      const aligned = warpToTemplate(buf as Uint8Array, fw, fh, m, 112); // 112×112×3 uint8
+
+      // Signed [-1,1] normalization = (px-127.5)/128 (FACE_NORM_UNIT pinned false).
+      const input = new Float32Array(aligned.length);
       if (FACE_NORM_UNIT) {
-        for (let i = 0; i < resized.length; i++) input[i] = resized[i] / 255.0;
+        for (let i = 0; i < aligned.length; i++) input[i] = aligned[i] / 255.0;
       } else {
-        for (let i = 0; i < resized.length; i++) input[i] = (resized[i] - 127.5) / 128.0;
+        for (let i = 0; i < aligned.length; i++) input[i] = (aligned[i] - 127.5) / 128.0;
       }
 
       const outputs = model.runSync([input]);
