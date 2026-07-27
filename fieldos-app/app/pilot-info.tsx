@@ -16,6 +16,7 @@ import { StatusChip } from '../components/fieldos/StatusChip';
 import { PrimaryButton } from '../components/fieldos/PrimaryButton';
 import { SecondaryButton } from '../components/fieldos/SecondaryButton';
 import { useTranslation } from '../i18n';
+import { orgName } from '../store/useFieldOSStore';
 import { auditPilotInfoViewed, auditFeedbackSubmitted } from '../services/auditService';
 import { enqueueSyncEvent } from '../db/repositories/syncQueueRepo';
 import { setSetting } from '../db/repositories/settingsRepo';
@@ -285,7 +286,7 @@ export default function PilotInfoScreen() {
               </TouchableOpacity>
               {expandedFaq === idx && (
                 <View style={styles.faqAnswer}>
-                  <Text style={styles.faqAnswerText}>{t(faq.aKey)}</Text>
+                  <Text style={styles.faqAnswerText}>{t(faq.aKey, { _o: orgName() })}</Text>
                 </View>
               )}
             </View>
@@ -411,7 +412,7 @@ function FeedbackModal({
             <View style={feedbackStyles.successIconBox}>
               <Ionicons name="checkmark-circle" size={56} color={colors.green} />
             </View>
-            <Text style={feedbackStyles.successTitle}>{t('feedbackSuccess')}</Text>
+            <Text style={feedbackStyles.successTitle}>{t('feedbackSuccess', { _o: orgName() })}</Text>
             <SecondaryButton onPress={handleClose}>
               {t('goBack')}
             </SecondaryButton>
@@ -440,7 +441,7 @@ function FeedbackModal({
 
           {/* Recommend dropdown */}
           <View style={feedbackStyles.selectSection}>
-            <Text style={feedbackStyles.selectLabel}>{t('wouldRecommend')}</Text>
+            <Text style={feedbackStyles.selectLabel}>{t('wouldRecommend', { _o: orgName() })}</Text>
             <View style={feedbackStyles.selectGrid}>
               {recommendOptions.map((option, idx) => (
                 <TouchableOpacity

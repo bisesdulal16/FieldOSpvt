@@ -22,6 +22,12 @@ async def create_promise(
     current_user: User = Depends(get_current_user),
 ):
     try:
+        if not current_user.branch_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Officer must have a branch assigned to record a promise-to-pay.",
+            )
+
         promise = PromiseToPay(
             client_id=request.client_id,
             task_id=request.task_id,
@@ -30,6 +36,7 @@ async def create_promise(
             reason=request.reason,
             outstanding_amount=float(request.outstanding_amount),
             status="pending",
+            branch_id=current_user.branch_id,
         )
         db.add(promise)
         await db.flush()

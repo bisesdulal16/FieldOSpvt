@@ -322,7 +322,7 @@ export default function LoginScreen() {
       </View>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>FieldOS Nepal v3.0.0</Text>
+        <Text style={styles.footerText}>{branding.orgName} Nepal v3.0.0</Text>
         <Text style={styles.footerText}>
           {t('authorizedOnly')}
         </Text>

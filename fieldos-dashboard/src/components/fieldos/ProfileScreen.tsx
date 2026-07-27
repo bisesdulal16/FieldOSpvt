@@ -134,7 +134,7 @@ export function ProfileScreen() {
           >
             <LogOut size={18} /> {isNe ? 'सुरक्षित लगआउट' : 'Secure Logout'}
           </button>
-          <p className="text-[9px] text-gray-400 text-center">FieldOS Nepal v2.1.0</p>
+          <p className="text-[9px] text-gray-400 text-center">Asha Nepal v2.1.0</p>
         </div>
       </div>
 

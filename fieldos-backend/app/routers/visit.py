@@ -8,7 +8,7 @@ from app.models.user import User
 from app.schemas.visit import VisitCheckinCreate
 from app.schemas.common import ApiResponse
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user, require_financial_access
+from app.deps.auth_deps import get_current_user, require_financial_access, can_see_all_branches
 from app.utils.nepal_time import now_nepal_iso
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,50 @@ async def create_visit_checkin(
 ):
     try:
         now_str = now_nepal_iso()
+
+        # Branch validation: a scoped user (branch manager) can only check in at clients
+        # whose tasks belong to their branch. Admin/HO sees nothing here (pass-through).
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            from app.models.client import Client as _Client
+            from app.models.task import TaskAssignment as _TA
+            from sqlalchemy import func, select as _sel
+
+            # Check client exists
+            client_check = await db.execute(
+                _sel(_Client.id).where(_Client.id == request.client_id)
+            )
+            if not client_check.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Client not found — cannot record a visit.",
+                )
+
+            # Check the client has task assignments in this officer's branch.
+            # Zero task assignments total = officer has no book yet (new officer), allow pass-through.
+            from sqlalchemy import and_ as _and_
+            has_any_ta = await db.execute(
+                _sel(func.count()).select_from(_TA)
+                .where(_TA.user_id == current_user.id)
+            )
+            if has_any_ta.scalar_one_or_none():
+                branch_check = await db.execute(
+                    _sel(_TA.client_id).where(_and_(
+                        _TA.client_id == request.client_id,
+                        _TA.branch_id == current_user.branch_id,
+                    )).limit(1)
+                )
+                if not branch_check.scalar_one_or_none():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="This client does not belong to your branch.",
+                    )
+            else:
+                # No tasks assigned → reject (branch managers without tasks cannot collect cross-branch)
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This client does not belong to your branch.",
+                )
+
         visit = VisitCheckin(
             client_id=request.client_id,
             task_id=request.task_id,
@@ -59,6 +103,8 @@ async def create_visit_checkin(
             },
             timestamp=int(time.time()),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Create visit checkin error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Visit checkin creation failed")

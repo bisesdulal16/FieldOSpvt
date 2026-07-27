@@ -54,7 +54,7 @@ async def test_no_anomalies_when_clean(client: AsyncClient):
     token = await login(client, "FO-208")
     # Record a visit first, then a GPS collection for the same client.
     await client.post("/api/v1/visit-checkins/", headers=auth(token),
-                      json={"client_id": 1, "gps_latitude": 27.69, "gps_longitude": 85.28, "purpose": "collection"})
+                      json={"client_id": 1, "gps_latitude": 27.69, "gps_longitude": 85.28, "visit_purpose": "collection"})
     await _collect(client, token, 1, 2500, "cash", gps=True)
 
     mtoken = await login(client, "BM-001")

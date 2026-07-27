@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runZAIChat } from '@/lib/zai-cli';
 
-const ASK_SYSTEM = `You are "FieldOS Assistant", an AI helper for microfinance field officers in Nepal.
+const ASK_SYSTEM = `You are "Asha Assistant", an AI helper for microfinance field officers in Nepal.
 You help officers with questions about their daily work — but you NEVER make decisions for them.
 
 Available data context (provided with each question):
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     if (context && typeof context === 'object') {
       promptParts.push(
-        `[FieldOS Data Context]\n${JSON.stringify(context, null, 2)}\n\n` +
+        `[Asha Data Context]\n${JSON.stringify(context, null, 2)}\n\n` +
         'Please use this data to answer my question.'
       );
     }

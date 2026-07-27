@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runZAIChat } from '@/lib/zai-cli';
 
-const SUMMARY_SYSTEM = `You are a visit summary assistant for FieldOS Nepal, a microfinance field officer app.
+const SUMMARY_SYSTEM = `You are a visit summary assistant for Asha Nepal, a microfinance field officer app.
 Generate a concise, professional visit summary from the officer's voice/text notes.
 
 The summary should include:

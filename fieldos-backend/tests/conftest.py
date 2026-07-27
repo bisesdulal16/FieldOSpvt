@@ -10,6 +10,8 @@ os.environ["SQLITE_PATH"] = "/tmp/fieldos_test.db"
 os.environ["SMS_PROVIDER"] = "log"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key"
 os.environ["ORG_NAME"] = "TestMFI"
+# Tests make many rapid requests — disable rate limiting.
+os.environ["RATE_LIMIT"] = "999999"
 
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -32,12 +34,11 @@ async def _reset_and_seed():
         branch = Branch(branch_id="BR-TEST", name="Test Branch", office_ip="127.0.0.1")
         s.add(branch)
         await s.flush()
-        s.add_all([
-            User(staff_id="FO-208", name="Ram Bahadur Shah", role="field_officer",
-                 hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True),
-            User(staff_id="BM-001", name="Suman Karki", role="branch_manager",
-                 hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True),
-        ])
+        fo = User(staff_id="FO-208", name="Ram Bahadur Shah", role="field_officer",
+                  hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True)
+        bm = User(staff_id="BM-001", name="Suman Karki", role="branch_manager",
+                  hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True)
+        s.add_all([fo, bm])
         client = Client(member_id="M-001", name="Sita Thapa", phone_number="+977-9800000001",
                         outstanding_balance=45000.0, due_amount=2500.0, status="active")
         s.add(client)
@@ -46,6 +47,11 @@ async def _reset_and_seed():
         s.add(LoanAccount(client_id=client.id, loan_id="LN-M-001-0001", product_type="micro_loan",
                           principal_amount=40000.0, outstanding_balance=0.0, installment_amount=1738.0,
                           installment_frequency="weekly", term_weeks=25, status="pending"))
+        # Seed a task assignment for FO-208 → client #1 (so same-branch collections work).
+        from app.models.task import TaskAssignment as _TA
+        ta = _TA(user_id=fo.id, client_id=client.id, branch_id=branch.id,
+                 task_date="2026-07-27", task_type="collection", status="pending")
+        s.add(ta)
         await s.commit()
 
 

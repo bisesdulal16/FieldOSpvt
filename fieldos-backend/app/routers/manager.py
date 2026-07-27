@@ -169,33 +169,55 @@ async def get_dashboard(
             Collection, current_user,
         ))).scalar() or 0
 
-        # 5. PAR followup due (clients with overdue > 0)
-        # NOTE: Client has no branch_id yet — NOT branch-scoped (tracked follow-up).
-        par_followup_due = (await db.execute(
-            select(func.count()).select_from(Client)
-            .where(and_(
-                Client.overdue_days > 0,
-                Client.status == "active",
-            ))
-        )).scalar() or 0
+        # 5. PAR followup due — scoped via TaskAssignment (Client has no branch_id).
+        if can_see_all_branches(current_user):
+            par_followup_due = (await db.execute(
+                select(func.count()).select_from(Client)
+                .where(and_(
+                    Client.overdue_days > 0,
+                    Client.status == "active",
+                ))
+            )).scalar() or 0
+        else:
+            scoped_client_ids = (
+                select(TaskAssignment.client_id)
+                .where(TaskAssignment.branch_id == current_user.branch_id)
+            )
+            par_followup_due = (await db.execute(
+                select(func.count()).select_from(Client)
+                .where(and_(
+                    Client.id.in_(scoped_client_ids),
+                    Client.overdue_days > 0,
+                    Client.status == "active",
+                ))
+            )).scalar() or 0
 
-        # 6. Missed PTP (overdue promises not fulfilled)
-        missed_ptp = (await db.execute(
-            select(func.count()).select_from(PromiseToPay)
-            .where(and_(
-                PromiseToPay.expected_payment_date < today,
-                PromiseToPay.status != "fulfilled",
-            ))
-        )).scalar() or 0
+        # 6. Missed PTP — scoped via PromiseToPay.branch_id.
+        if can_see_all_branches(current_user):
+            missed_ptp = (await db.execute(
+                select(func.count()).select_from(PromiseToPay)
+                .where(and_(
+                    PromiseToPay.expected_payment_date < today,
+                    PromiseToPay.status != "fulfilled",
+                ))
+            )).scalar() or 0
+        else:
+            missed_ptp = (await db.execute(scope_to_branch(
+                select(func.count()).select_from(PromiseToPay)
+                .where(and_(
+                    PromiseToPay.expected_payment_date < today,
+                    PromiseToPay.status != "fulfilled",
+                )),
+                PromiseToPay, current_user,
+            ))).scalar() or 0
 
-        # 7. Pending sync
+        # 7. Pending sync (org-wide — SyncEvent has no branch_id).
         pending_sync = (await db.execute(
             select(func.count()).select_from(SyncEvent)
             .where(SyncEvent.status == "pending")
         )).scalar() or 0
 
-        # 8. Exceptions count — derived from multiple sources
-        #    a) High-value unverified collections
+        # 8. Exceptions count
         high_val_unverified = (await db.execute(scope_to_branch(
             select(func.count()).select_from(Collection)
             .where(and_(
@@ -205,19 +227,33 @@ async def get_dashboard(
             Collection, current_user,
         ))).scalar() or 0
 
-        #    b) EOD reports with cash-related exceptions
-        eod_with_exceptions = (await db.execute(
-            select(func.count()).select_from(EndOfDayReport)
-            .where(EndOfDayReport.exceptions_json.isnot(None))
-        )).scalar() or 0
+        if can_see_all_branches(current_user):
+            eod_with_exceptions = (await db.execute(
+                select(func.count()).select_from(EndOfDayReport)
+                .where(EndOfDayReport.exceptions_json.isnot(None))
+            )).scalar() or 0
+        else:
+            eod_with_exceptions = (await db.execute(scope_to_branch(
+                select(func.count()).select_from(EndOfDayReport)
+                .where(EndOfDayReport.exceptions_json.isnot(None)),
+                EndOfDayReport, current_user,
+            ))).scalar() or 0
 
-        #    c) NPA-risk clients (overdue >= 30)
-        npa_risk = (await db.execute(
-            select(func.count()).select_from(Client)
-            .where(Client.overdue_days >= 30)
-        )).scalar() or 0
+        if can_see_all_branches(current_user):
+            npa_risk = (await db.execute(
+                select(func.count()).select_from(Client)
+                .where(Client.overdue_days >= 30)
+            )).scalar() or 0
+        else:
+            scoped_client_ids_npa = (
+                select(TaskAssignment.client_id)
+                .where(TaskAssignment.branch_id == current_user.branch_id)
+            )
+            npa_risk = (await db.execute(
+                select(func.count()).select_from(Client)
+                .where(and_(Client.id.in_(scoped_client_ids_npa), Client.overdue_days >= 30))
+            )).scalar() or 0
 
-        #    d) Failed sync events
         failed_sync = (await db.execute(
             select(func.count()).select_from(SyncEvent)
             .where(SyncEvent.status == "failed")
@@ -225,11 +261,16 @@ async def get_dashboard(
 
         exceptions_count = high_val_unverified + eod_with_exceptions + npa_risk + failed_sync
 
-        # 9. Cash mismatch NPR — from EOD exceptions_json
+        # 9. Cash mismatch NPR — from EOD exceptions_json (scoped).
         cash_mismatch_npr = 0
-        eod_result = await db.execute(
-            select(EndOfDayReport).where(EndOfDayReport.exceptions_json.isnot(None))
-        )
+        if can_see_all_branches(current_user):
+            eod_base_stmt = select(EndOfDayReport).where(EndOfDayReport.exceptions_json.isnot(None))
+        else:
+            scoped_eod_ids = scope_to_branch(
+                select(EndOfDayReport.id), EndOfDayReport, current_user
+            )
+            eod_base_stmt = select(EndOfDayReport).where(EndOfDayReport.id.in_(scoped_eod_ids))
+        eod_result = await db.execute(eod_base_stmt)
         for eod in eod_result.scalars().all():
             try:
                 exc = json.loads(eod.exceptions_json)
@@ -569,24 +610,43 @@ async def get_collections(
 async def get_par_followup(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Returns PAR/overdue clients who need follow-up.
+    """Returns PAR/overdue clients who need follow-up, scoped to the requesting user's branch.
 
-    NOT branch-scoped yet: driven entirely by Client (no branch_id — migration 008
-    only covers collections/visits/tasks). Client branch scoping is a tracked
-    follow-up; a branch manager currently sees org-wide PAR here.
+    Client has no branch_id — scope via TaskAssignment.branch_id (the task book).
+    A manager only sees overdue clients for whom they have a task assignment in their branch.
     """
     try:
-        # Get overdue clients
-        result = await db.execute(
-            select(Client)
-            .where(and_(
-                Client.overdue_days > 0,
-                Client.status == "active",
-            ))
-            .order_by(Client.overdue_days.desc())
-            .limit(limit)
-        )
+        # Find overdue clients scoped to this user's branch via TaskAssignment.
+        if can_see_all_branches(current_user):
+            base_stmt = (
+                select(Client)
+                .where(and_(
+                    Client.overdue_days > 0,
+                    Client.status == "active",
+                ))
+                .order_by(Client.overdue_days.desc())
+                .limit(limit)
+            )
+        else:
+            # Only clients that have task assignments in this user's branch.
+            scoped_client_ids = (
+                select(TaskAssignment.client_id)
+                .where(TaskAssignment.branch_id == current_user.branch_id)
+            )
+            base_stmt = (
+                select(Client)
+                .where(and_(
+                    Client.id.in_(scoped_client_ids),
+                    Client.overdue_days > 0,
+                    Client.status == "active",
+                ))
+                .order_by(Client.overdue_days.desc())
+                .limit(limit)
+            )
+
+        result = await db.execute(base_stmt)
         overdue_clients = result.scalars().all()
 
         par_data = []
@@ -631,12 +691,11 @@ async def get_par_followup(
 # ---------------------------------------------------------------------------
 
 @router.get("/ptp-today", response_model=ApiResponse)
-async def get_ptp_today(db: AsyncSession = Depends(get_db)):
-    """Returns promise-to-pay records due today.
-
-    NOT branch-scoped yet: driven by PromiseToPay (no branch_id — migration 008
-    covers collections/visits/tasks only). Tracked follow-up.
-    """
+async def get_ptp_today(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns promise-to-pay records due today, scoped to the requesting user's branch."""
     try:
         today = _today_str()
 
@@ -654,6 +713,7 @@ async def get_ptp_today(db: AsyncSession = Depends(get_db)):
             .where(PromiseToPay.expected_payment_date == today)
             .order_by(PromiseToPay.created_at.desc())
         )
+        stmt = scope_to_branch(stmt, PromiseToPay, current_user)
         result = await db.execute(stmt)
         rows = result.all()
 
@@ -824,22 +884,22 @@ async def get_exceptions(
 # ---------------------------------------------------------------------------
 
 @router.get("/eod-reviews", response_model=ApiResponse)
-async def get_eod_reviews(db: AsyncSession = Depends(get_db)):
-    """Returns EOD submission status summary and report list.
-
-    NOT branch-scoped yet: driven by EndOfDayReport (no branch_id — migration 008
-    covers collections/visits/tasks). Tracked follow-up; a branch manager currently
-    sees org-wide EOD submissions here.
-    """
+async def get_eod_reviews(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns EOD submission status summary and report list, scoped to the requesting user's branch."""
     try:
         today = _today_str()
 
-        # Get all EOD reports
-        result = await db.execute(
+        # Get EOD reports for this branch (admin sees all)
+        stmt = (
             select(EndOfDayReport, User.name.label("officer_name"), User.staff_id.label("staff_id"))
             .outerjoin(User, EndOfDayReport.officer_id == User.id)
             .order_by(EndOfDayReport.report_date.desc(), EndOfDayReport.created_at.desc())
         )
+        stmt = scope_to_branch(stmt, EndOfDayReport, current_user)
+        result = await db.execute(stmt)
         rows = result.all()
 
         submitted_count = 0
@@ -848,26 +908,28 @@ async def get_eod_reviews(db: AsyncSession = Depends(get_db)):
         reviews = []
 
         for eod, officer_name, staff_id in rows:
-            # Determine status
+            # Determine status (use _st to avoid shadowing FastAPI status module)
             if eod.is_submitted:
-                status = "submitted"
+                _st = "submitted"
                 submitted_count += 1
             elif eod.report_date < today:
-                status = "overdue"
+                _st = "overdue"
                 overdue_count += 1
             else:
-                status = "pending"
+                _st = "pending"
                 pending_count += 1
 
-            # Count actual collections for this officer on this date
-            coll_count_result = await db.execute(
+            # Count actual collections for this officer on this date (branch-scoped)
+            coll_count_stmt = (
                 select(func.count()).select_from(Collection)
                 .join(TaskAssignment, Collection.task_id == TaskAssignment.id)
                 .where(and_(
                     TaskAssignment.user_id == eod.officer_id,
                     Collection.collected_at.like(f"{eod.report_date}%"),
+                    Collection.branch_id == current_user.branch_id,
                 ))
             )
+            coll_count_result = await db.execute(coll_count_stmt)
             collections_count = coll_count_result.scalar() or 0
 
             reviews.append({
@@ -878,7 +940,7 @@ async def get_eod_reviews(db: AsyncSession = Depends(get_db)):
                 "collections_count": collections_count,
                 "collections_npr": round(eod.total_collections, 2),
                 "visits_count": eod.total_visits,
-                "status": status,
+                "status": _st,
                 "submitted_at": str(eod.created_at) if eod.is_submitted else None,
             })
 
@@ -908,10 +970,13 @@ async def get_eod_reviews(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/sync-status", response_model=ApiResponse)
-async def get_sync_status(db: AsyncSession = Depends(get_db)):
-    """Returns sync monitoring data with per-device status."""
+async def get_sync_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns sync monitoring data scoped to the requesting user's branch."""
     try:
-        # Total event counts by status
+        # Total event counts by status (org-wide — no branch_id on SyncEvent).
         total_events = (await db.execute(
             select(func.count()).select_from(SyncEvent)
         )).scalar() or 0
@@ -931,12 +996,25 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
             .where(SyncEvent.status == "failed")
         )).scalar() or 0
 
-        # Per-device status
-        devices_result = await db.execute(
-            select(Device, User.name.label("user_name"))
-            .outerjoin(User, Device.user_id == User.id)
-            .order_by(Device.last_sync_at.desc().nullslast())
-        )
+        # Per-device status — scoped to requesting user's branch via officer→branch.
+        if can_see_all_branches(current_user):
+            devices_stmt = (
+                select(Device, User.name.label("user_name"))
+                .outerjoin(User, Device.user_id == User.id)
+                .order_by(Device.last_sync_at.desc().nullslast())
+            )
+        else:
+            scoped_officer_ids = (
+                select(User.id).where(and_(User.branch_id == current_user.branch_id, User.is_active == True))  # noqa: E712
+            )
+            devices_stmt = (
+                select(Device, User.name.label("user_name"))
+                .outerjoin(User, Device.user_id == User.id)
+                .where(or_(Device.user_id == None, Device.user_id.in_(scoped_officer_ids)))  # noqa: PLE1142
+                .order_by(Device.last_sync_at.desc().nullslast())
+            )
+
+        devices_result = await db.execute(devices_stmt)
         devices_data = []
         for device, user_name in devices_result.all():
             # Determine device online status based on last_sync_at
@@ -1013,23 +1091,27 @@ async def get_audit_logs(
     limit: int = Query(50, ge=1, le=500),
     action_type: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Returns recent audit logs with user names."""
+    """Returns recent audit logs scoped to the requesting user's branch."""
     try:
-        stmt = (
-            select(
-                AuditLog,
-                User.name.label("user_name"),
+        # AuditLog.user_id → users.branch_id. Scope via subquery on user→branch.
+        if can_see_all_branches(current_user):
+            base_stmt = select(AuditLog, User.staff_id.label("user_staff")).outerjoin(User, AuditLog.user_id == User.id).order_by(AuditLog.created_at.desc())
+        else:
+            scoped_user_ids = (
+                select(User.id).where(and_(
+                    User.branch_id == current_user.branch_id,
+                    User.is_active == True,  # noqa: E712
+                ))
             )
-            .outerjoin(User, AuditLog.user_id == User.id)
-            .order_by(AuditLog.created_at.desc())
-        )
+            base_stmt = select(AuditLog, User.staff_id.label("user_staff")).where(AuditLog.user_id.in_(scoped_user_ids)).outerjoin(User, AuditLog.user_id == User.id).order_by(AuditLog.created_at.desc())
 
         if action_type:
-            stmt = stmt.where(AuditLog.action_type == action_type)
+            base_stmt = base_stmt.where(AuditLog.action_type == action_type)
 
-        stmt = stmt.limit(limit)
-        result = await db.execute(stmt)
+        base_stmt = base_stmt.limit(limit)
+        result = await db.execute(base_stmt)
         rows = result.all()
 
         logs_data = []
@@ -1081,17 +1163,31 @@ async def get_audit_logs(
 async def get_receipt_notifications(
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Every receipt SMS the system sent to a client on a collection, with the client name.
-    This is the manager's proof that clients were told the exact recorded amount."""
+    """Every receipt SMS scoped to the requesting user's branch."""
     try:
-        stmt = (
-            select(SmsNotification, Client.name.label("client_name"), Client.member_id.label("member_id"))
-            .outerjoin(Client, SmsNotification.client_id == Client.id)
-            .order_by(SmsNotification.created_at.desc())
-            .limit(limit)
-        )
-        rows = (await db.execute(stmt)).all()
+        # SmsNotification → Collection.client_id → Client. Scope via Collection.branch_id.
+        if can_see_all_branches(current_user):
+            base_stmt = (
+                select(SmsNotification, Client.name.label("client_name"), Client.member_id.label("member_id"))
+                .outerjoin(Client, SmsNotification.client_id == Client.id)
+                .order_by(SmsNotification.created_at.desc())
+            )
+        else:
+            scoped_receipts = (
+                select(Collection.receipt_id).where(Collection.branch_id == current_user.branch_id)
+            )
+            base_stmt = (
+                select(SmsNotification, Client.name.label("client_name"), Client.member_id.label("member_id"))
+                .outerjoin(Client, SmsNotification.client_id == Client.id)
+                .where(SmsNotification.collection_receipt_id.in_(scoped_receipts))
+                .order_by(SmsNotification.created_at.desc())
+            )
+
+        base_stmt = base_stmt.limit(limit)
+        result = await db.execute(base_stmt)
+        rows = result.all()
         data = [{
             "id": n.id,
             "client_name": client_name,
@@ -1118,9 +1214,12 @@ async def sync_events(
     status_filter: str | None = Query(None, alias="status", description="pending|completed|failed"),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """The full sync-queue log — every offline record's sync attempt with status, retry count,
     and error. Lets the manager see exactly what synced, what's pending, and what failed and why."""
+    # Note: SyncEvent has no branch_id column — queries are institution-wide.
+    # Admin sees everything; scoped users also see everything because there is no officer link.
     try:
         q = select(SyncEvent).order_by(SyncEvent.id.desc())
         if status_filter:
@@ -1542,6 +1641,7 @@ async def get_day_starts(
 async def create_staff(
     body: dict,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Branch manager creates a new staff member (e.g. field officer).
@@ -1552,7 +1652,7 @@ async def create_staff(
       - name_ne: str | None (optional)
       - phone_number: str | None (optional)
       - role: str (default 'field_officer')
-      - branch_id: int | None (defaults to manager's branch)
+      - branch_id: int | None (defaults to requesting user's branch)
       - pin: str (plain text, will be bcrypt hashed)
     """
     try:
@@ -1563,6 +1663,14 @@ async def create_staff(
         phone_number = body.get("phone_number", "") or None
         role = body.get("role", "field_officer")
         branch_id = body.get("branch_id")
+
+        # Branch enforcement: only admins/HO can create cross-branch staff.
+        if not can_see_all_branches(current_user):
+            if current_user.branch_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Manager must have a branch assigned to create staff.",
+                )
 
         if not staff_id or not name or not pin:
             raise HTTPException(status_code=400, detail="staff_id, name, and pin are required")
@@ -1577,14 +1685,9 @@ async def create_staff(
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=409, detail=f"Staff ID '{staff_id}' already exists")
 
-        # Get manager's branch if not specified
+        # Default to requesting user's branch (not hardcoded BM-001).
         if branch_id is None:
-            # Use the requesting manager's branch from the context
-            # For now, default to the first active branch
-            branch_result = await db.execute(select(User.branch_id).where(User.staff_id == "BM-001"))
-            bm_branch = branch_result.scalar_one_or_none()
-            if bm_branch:
-                branch_id = bm_branch
+            branch_id = current_user.branch_id
 
         hashed = hash_pin(pin)
         user = User(
@@ -1793,13 +1896,23 @@ async def get_today_assigned_tasks(
 @router.get("/clients", response_model=ApiResponse)
 async def get_manager_clients(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Returns all clients for the manager dashboard (used by Assign Task form)."""
+    """Returns clients scoped to the requesting user's branch (used by Assign Task form)."""
     try:
-        result = await db.execute(
-            select(Client)
-            .order_by(Client.name)
-        )
+        if can_see_all_branches(current_user):
+            result = await db.execute(
+                select(Client).order_by(Client.name)
+            )
+        else:
+            scoped_ids = (
+                select(TaskAssignment.client_id)
+                .where(TaskAssignment.branch_id == current_user.branch_id)
+            )
+            result = await db.execute(
+                select(Client).where(Client.id.in_(scoped_ids)).order_by(Client.name)
+            )
+
         clients = result.scalars().all()
 
         clients_data = []

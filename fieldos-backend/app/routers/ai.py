@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 
 from app.database import get_db
-from app.deps.auth_deps import require_manager_or_admin
+from app.deps.auth_deps import get_current_user, require_manager_or_admin
 from app.models.user import User
 from app.models.client import Client
 from app.models.collection import Collection
@@ -187,28 +187,61 @@ async def get_priority_queue(
     limit: int = Query(100, ge=1, le=500),
     officer_id: int | None = Query(None, description="Filter by assigned officer ID"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Returns clients sorted by AI priority score (highest first). Optionally filtered by officer."""
+    """Returns clients sorted by AI priority score (highest first), scoped to the requesting user's branch."""
+    from app.deps.auth_deps import can_see_all_branches, scope_to_branch
+
     try:
         today = _today_str()
 
-        # Batch: All active clients
-        all_clients = (await db.execute(
-            select(Client).where(Client.status == "active")
-        )).scalars().all()
+        # Batch: Active clients scoped to this user's branch via TaskAssignment.
+        if can_see_all_branches(current_user):
+            active_client_ids_stmt = select(Client.id).where(Client.status == "active")
+        else:
+            scoped_cids = (
+                select(TaskAssignment.client_id).where(TaskAssignment.branch_id == current_user.branch_id)
+            )
+            active_client_ids_stmt = (
+                select(Client.id).where(and_(Client.status == "active", Client.id.in_(scoped_cids)))
+            )
 
-        # Batch: PTP due today
-        ptp_today = (await db.execute(
-            select(PromiseToPay.client_id).where(PromiseToPay.expected_payment_date == today)
-        )).scalars().all()
+        # Execute the client IDs query and fetch full Client objects
+        result = await db.execute(active_client_ids_stmt)
+        active_client_ids = set(result.scalars().all())
+        if not active_client_ids:
+            return ApiResponse(success=True, data={"total_clients": 0, "tier_counts": {}, "queue": []}, timestamp=_ts())
+
+        clients_result = await db.execute(select(Client).where(Client.id.in_(active_client_ids)))
+        all_clients = clients_result.scalars().all()
+
+        # Batch: PTP due today — scoped.
+        if can_see_all_branches(current_user):
+            ptp_today = (await db.execute(
+                select(PromiseToPay.client_id).where(PromiseToPay.expected_payment_date == today)
+            )).scalars().all()
+        else:
+            ptp_ids_stmt = scope_to_branch(
+                select(PromiseToPay.client_id).where(PromiseToPay.expected_payment_date == today),
+                PromiseToPay, current_user,
+            )
+            ptp_today = (await db.execute(ptp_ids_stmt)).scalars().all()
         ptp_today_set = set(ptp_today)
 
-        # Batch: Missed PTP
-        missed_ptp = (await db.execute(
-            select(PromiseToPay.client_id).where(
-                and_(PromiseToPay.expected_payment_date < today, PromiseToPay.status != "fulfilled")
-            )
-        )).scalars().all()
+        # Batch: Missed PTP — branch-scoped so a manager only sees their own branch's broken promises.
+        if can_see_all_branches(current_user):
+            missed_ptp = (await db.execute(
+                select(PromiseToPay.client_id).where(
+                    and_(PromiseToPay.expected_payment_date < today, PromiseToPay.status != "fulfilled")
+                )
+            )).scalars().all()
+        else:
+            missed_ptp = (await db.execute(scope_to_branch(
+                select(PromiseToPay.client_id).where(
+                    and_(PromiseToPay.expected_payment_date < today, PromiseToPay.status != "fulfilled")
+                ),
+                PromiseToPay, current_user,
+            ))).scalars().all()
         missed_ptp_set = set(missed_ptp)
 
         # Batch: Today's visited client IDs

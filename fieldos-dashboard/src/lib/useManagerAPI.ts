@@ -33,12 +33,12 @@ export interface Branding {
 }
 
 const DEFAULT_BRANDING: Branding = {
-  org_name: 'FieldOS', org_name_ne: '', tagline: 'Nepal',
+  org_name: 'Asha', org_name_ne: '', tagline: 'Nepal',
   product_suffix: 'Branch Manager Dashboard',
   primary_color: '#0B1B3A', accent_color: '#F59E0B', logo_url: '',
 };
 
-/** Public white-label branding. Falls back to FieldOS defaults if unavailable. */
+/** Public white-label branding. Falls back to Asha defaults if unavailable. */
 export function useBranding(): Branding {
   const { data } = useManagerAPI<Branding>('branding/', true);
   return data || DEFAULT_BRANDING;
