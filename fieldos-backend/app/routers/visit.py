@@ -8,7 +8,7 @@ from app.models.user import User
 from app.schemas.visit import VisitCheckinCreate
 from app.schemas.common import ApiResponse
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user, require_financial_access
+from app.deps.auth_deps import get_current_user, require_financial_access, can_see_all_branches
 from app.utils.nepal_time import now_nepal_iso
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,36 @@ async def create_visit_checkin(
 ):
     try:
         now_str = now_nepal_iso()
+
+        # Branch validation: a scoped user (branch manager) can only check in at clients
+        # whose tasks belong to their branch. Admin/HO sees nothing here (pass-through).
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            from app.models.client import Client as _Client
+            from app.models.task import TaskAssignment as _TA
+            from sqlalchemy import select as _sel, and_ as _and_
+
+            client_check = await db.execute(
+                _sel(_Client.id).where(_Client.id == request.client_id)
+            )
+            client_obj = client_check.scalar_one_or_none()
+            if not client_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Client not found — cannot record a visit.",
+                )
+
+            branch_check = await db.execute(
+                _sel(_TA.client_id).where(_and_(
+                    _TA.client_id == client_obj.id,
+                    _TA.branch_id == current_user.branch_id,
+                )).limit(1)
+            )
+            if not branch_check.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This client does not belong to your branch.",
+                )
+
         visit = VisitCheckin(
             client_id=request.client_id,
             task_id=request.task_id,

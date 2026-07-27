@@ -2,7 +2,7 @@ import time
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from app.database import get_db
 from app.models.collection import Collection
@@ -13,7 +13,7 @@ from app.schemas.common import ApiResponse
 from app.services import auth_service
 from app.services.audit_helper import write_audit
 from app.services.sms_service import record_and_send_receipt
-from app.deps.auth_deps import get_current_user, require_financial_access
+from app.deps.auth_deps import get_current_user, require_financial_access, can_see_all_branches
 from app.utils.nepal_time import to_nepal_iso
 
 logger = logging.getLogger(__name__)
@@ -46,11 +46,28 @@ async def create_collection(
         if request.client_id:
             client_result = await db.execute(select(Client).where(Client.id == request.client_id))
             client = client_result.scalar_one_or_none()
+
+        # Branch validation: a scoped user (branch manager) can only collect for clients
+        # whose tasks belong to their branch. Admin/HO sees nothing here (pass-through).
         if not client:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Client not found — cannot record a collection.",
             )
+
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            from app.models.task import TaskAssignment as _TA
+            branch_check = await db.execute(
+                select(_TA.client_id).where(and_(
+                    _TA.client_id == client.id,
+                    _TA.branch_id == current_user.branch_id,
+                )).limit(1)
+            )
+            if not branch_check.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This client does not belong to your branch.",
+                )
 
         current_outstanding = float(client.outstanding_balance or 0.0)
         # Hard cap: a collection can never exceed the outstanding balance. This blocks

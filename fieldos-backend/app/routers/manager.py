@@ -631,12 +631,11 @@ async def get_par_followup(
 # ---------------------------------------------------------------------------
 
 @router.get("/ptp-today", response_model=ApiResponse)
-async def get_ptp_today(db: AsyncSession = Depends(get_db)):
-    """Returns promise-to-pay records due today.
-
-    NOT branch-scoped yet: driven by PromiseToPay (no branch_id — migration 008
-    covers collections/visits/tasks only). Tracked follow-up.
-    """
+async def get_ptp_today(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns promise-to-pay records due today, scoped to the requesting user's branch."""
     try:
         today = _today_str()
 
@@ -654,6 +653,7 @@ async def get_ptp_today(db: AsyncSession = Depends(get_db)):
             .where(PromiseToPay.expected_payment_date == today)
             .order_by(PromiseToPay.created_at.desc())
         )
+        stmt = scope_to_branch(stmt, PromiseToPay, current_user)
         result = await db.execute(stmt)
         rows = result.all()
 
@@ -824,23 +824,22 @@ async def get_exceptions(
 # ---------------------------------------------------------------------------
 
 @router.get("/eod-reviews", response_model=ApiResponse)
-async def get_eod_reviews(db: AsyncSession = Depends(get_db)):
-    """Returns EOD submission status summary and report list.
-
-    NOT branch-scoped yet: driven by EndOfDayReport (no branch_id — migration 008
-    covers collections/visits/tasks). Tracked follow-up; a branch manager currently
-    sees org-wide EOD submissions here.
-    """
+async def get_eod_reviews(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns EOD submission status summary and report list, scoped to the requesting user's branch."""
     try:
         today = _today_str()
 
-        # Get all EOD reports
-        result = await db.execute(
+        # Get EOD reports for this branch (admin sees all)
+        stmt = (
             select(EndOfDayReport, User.name.label("officer_name"), User.staff_id.label("staff_id"))
             .outerjoin(User, EndOfDayReport.officer_id == User.id)
             .order_by(EndOfDayReport.report_date.desc(), EndOfDayReport.created_at.desc())
         )
-        rows = result.all()
+        stmt = scope_to_branch(stmt, EndOfDayReport, current_user)
+        result = await db.execute(stmt)
 
         submitted_count = 0
         pending_count = 0
@@ -859,15 +858,17 @@ async def get_eod_reviews(db: AsyncSession = Depends(get_db)):
                 status = "pending"
                 pending_count += 1
 
-            # Count actual collections for this officer on this date
-            coll_count_result = await db.execute(
+            # Count actual collections for this officer on this date (branch-scoped)
+            coll_count_stmt = (
                 select(func.count()).select_from(Collection)
                 .join(TaskAssignment, Collection.task_id == TaskAssignment.id)
                 .where(and_(
                     TaskAssignment.user_id == eod.officer_id,
                     Collection.collected_at.like(f"{eod.report_date}%"),
+                    Collection.branch_id == current_user.branch_id,
                 ))
             )
+            coll_count_result = await db.execute(coll_count_stmt)
             collections_count = coll_count_result.scalar() or 0
 
             reviews.append({

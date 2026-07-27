@@ -19,3 +19,4 @@ class PromiseToPay(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     outstanding_amount: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True)

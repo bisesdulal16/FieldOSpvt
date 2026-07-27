@@ -23,6 +23,12 @@ async def create_eod_report(
     current_user: User = Depends(get_current_user),
 ):
     try:
+        if not current_user.branch_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Officer must have a branch assigned to submit an EOD report.",
+            )
+
         officer_id = current_user.id  # from the authenticated token
 
         exceptions_json = json.dumps(request.exceptions) if request.exceptions else None
@@ -37,6 +43,7 @@ async def create_eod_report(
             is_confirmed=True,
             is_submitted=True,
             face_verified=request.face_verified,
+            branch_id=current_user.branch_id,
         )
         db.add(report)
         await db.flush()

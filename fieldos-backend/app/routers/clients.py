@@ -2,7 +2,7 @@ import time
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import and_, select, func
 
 from app.database import get_db
 from app.models.client import Client
@@ -12,7 +12,7 @@ from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedResponse
 from app.schemas.loan import BorrowerCreate
 from app.services.audit_helper import write_audit
-from app.deps.auth_deps import get_current_user, require_financial_access
+from app.deps.auth_deps import get_current_user, require_financial_access, can_see_all_branches
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -142,9 +142,23 @@ async def get_clients(
 
 
 @router.get("/{client_id}", response_model=ApiResponse)
-async def get_client_detail(client_id: int, db: AsyncSession = Depends(get_db)):
+async def get_client_detail(
+    client_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
-        result = await db.execute(select(Client).where(Client.id == client_id))
+        # Branch-scoped: a scoped user (branch manager) can only see clients
+        # that belong to their branch — resolved via TaskAssignment (Client has no branch_id).
+        stmt = select(Client).where(Client.id == client_id)
+        if not can_see_all_branches(current_user):
+            from app.models.task import TaskAssignment as TA
+            task_stmt = select(TA.client_id).where(
+                and_(TA.client_id == client_id, TA.branch_id == current_user.branch_id)
+            )
+            stmt = stmt.where(Client.id.in_(task_stmt))
+
+        result = await db.execute(stmt)
         client = result.scalar_one_or_none()
         if not client:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")

@@ -21,6 +21,7 @@ class EndOfDayReport(Base):
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_submitted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     face_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True)
 
     officer = relationship("User", back_populates="eod_reports")
 
