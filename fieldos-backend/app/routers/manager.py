@@ -14,7 +14,12 @@ from sqlalchemy import select, func, and_, or_, outerjoin, case
 from sqlalchemy.orm import aliased
 
 from app.database import get_db
-from app.deps.auth_deps import require_manager_or_admin, require_financial_access
+from app.deps.auth_deps import (
+    require_manager_or_admin,
+    require_financial_access,
+    get_current_user,
+    scope_to_branch,
+)
 from app.utils.nepal_time import today_nepal_str, days_ago_nepal_str
 from app.models.user import User, UserRole
 from app.models.client import Client
@@ -1518,6 +1523,7 @@ async def create_staff(
 async def create_task(
     body: dict,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Branch manager assigns a task to an officer.
@@ -1557,9 +1563,20 @@ async def create_task(
                 resolved_user = user_result.scalar_one_or_none()
                 resolved_user_id = resolved_user.id if resolved_user else None
 
+        # Task branch = the ASSIGNEE officer's branch (where the work happens), so an
+        # area manager assigning across branches tags the row correctly. Falls back to
+        # the assigning manager's branch if the task is unassigned. (Branch scoping, mig 008.)
+        task_branch_id = current_user.branch_id
+        if resolved_user_id is not None:
+            assignee_result = await db.execute(select(User).where(User.id == resolved_user_id))
+            assignee = assignee_result.scalar_one_or_none()
+            if assignee and assignee.branch_id is not None:
+                task_branch_id = assignee.branch_id
+
         task = TaskAssignment(
             client_id=int(client_id),
             user_id=resolved_user_id,
+            branch_id=task_branch_id,
             task_type=task_type,
             task_date=str(task_date),
             status="pending",

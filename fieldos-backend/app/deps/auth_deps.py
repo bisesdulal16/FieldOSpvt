@@ -238,3 +238,45 @@ require_financial_access = require_department(
     Department.AUDIT.value,
     Department.HEAD_OFFICE.value,
 )
+
+
+# ---------------------------------------------------------------------------
+# Branch scoping — the ONE enforced place (CLAUDE.md hard-rule #5)
+# ---------------------------------------------------------------------------
+
+# Roles allowed to see across ALL branches (the consolidated head-office view).
+# Everyone else (a branch manager) is pinned to their own branch_id. `admin` is
+# the HO/consolidated role; area/branch managers are scoped. Keep this list here
+# so the cross-branch boundary is defined in exactly one spot.
+_CROSS_BRANCH_ROLES: frozenset[str] = frozenset({UserRole.ADMIN.value})
+
+
+def can_see_all_branches(user: User) -> bool:
+    """True if this user is allowed the consolidated cross-branch view."""
+    return user.role in _CROSS_BRANCH_ROLES
+
+
+def scope_to_branch(query, model, user: User):
+    """
+    Apply branch scoping to a SELECT so a branch manager only sees their own
+    branch's rows, while admin/HO sees everything.
+
+    `model` must expose a `branch_id` column (collections, visit_checkins,
+    task_assignments — see migration 008). Usage:
+
+        q = select(Collection).where(Collection.collected_at.like(f"{today}%"))
+        q = scope_to_branch(q, Collection, current_user)
+
+    Rules:
+      - admin/HO (can_see_all_branches) → query returned unchanged (all branches).
+      - a scoped user with a branch_id → filtered to that branch.
+      - a scoped user with NO branch_id → filtered to an impossible value so they
+        see nothing, rather than silently leaking every branch. A manager without
+        a branch is a misconfiguration; fail closed, not open.
+    """
+    if can_see_all_branches(user):
+        return query
+    if user.branch_id is None:
+        # Fail closed: no branch assigned → no rows (never "all rows").
+        return query.where(model.branch_id == -1)
+    return query.where(model.branch_id == user.branch_id)

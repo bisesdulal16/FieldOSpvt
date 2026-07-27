@@ -14,6 +14,9 @@ class VisitCheckin(Base):
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("task_assignments.id"), nullable=True)
     officer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Branch scoping — stamped from the recording officer's branch at write time
+    # (see Collection.branch_id). Managers filter visit lists/dashboards on this.
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     visit_purpose: Mapped[str | None] = mapped_column(String(100), nullable=True)
     gps_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     gps_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)

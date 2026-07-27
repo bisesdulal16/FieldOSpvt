@@ -14,6 +14,9 @@ class TaskAssignment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Branch scoping — stamped from the ASSIGNEE officer's branch (where the work
+    # happens), so an area manager assigning across branches tags the row correctly.
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     task_type: Mapped[str] = mapped_column(String(30), nullable=False, default="collection")
     task_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")

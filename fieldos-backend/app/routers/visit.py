@@ -28,6 +28,7 @@ async def create_visit_checkin(
             client_id=request.client_id,
             task_id=request.task_id,
             officer_id=current_user.id,  # from the authenticated token
+            branch_id=current_user.branch_id,  # stamp the officer's branch for scoping
             visit_purpose=request.visit_purpose,
             gps_latitude=request.gps_latitude,
             gps_longitude=request.gps_longitude,
