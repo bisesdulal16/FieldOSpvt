@@ -1,5 +1,10 @@
 # Handoff — Multi-Branch Asha Pilot (2026-07-27)
 
+> **SUPERSEDED IN PART (later same day):** P2 (Asha branding, commit `08e66ddc`) and P3
+> (Client/PTP/EOD branch scoping, commit `ac1bb69e`) — listed as remaining in §3/§4 below — have
+> since SHIPPED. Remaining work + the CI fix now live in `HANDOFF_QWEN_2026-07-27.md`. Trust
+> `git log` + that file over §3/§4 here. The decisions (§1) and architecture (§2) still hold.
+
 > Session handoff so this can be picked up in Hermes. Covers what was decided, what
 > shipped, how it was verified, and the exact follow-ups left before the pilot.
 > When this doc and older docs disagree, this doc + `git log` win.
