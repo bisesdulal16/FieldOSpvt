@@ -32,12 +32,11 @@ async def _reset_and_seed():
         branch = Branch(branch_id="BR-TEST", name="Test Branch", office_ip="127.0.0.1")
         s.add(branch)
         await s.flush()
-        s.add_all([
-            User(staff_id="FO-208", name="Ram Bahadur Shah", role="field_officer",
-                 hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True),
-            User(staff_id="BM-001", name="Suman Karki", role="branch_manager",
-                 hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True),
-        ])
+        fo = User(staff_id="FO-208", name="Ram Bahadur Shah", role="field_officer",
+                  hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True)
+        bm = User(staff_id="BM-001", name="Suman Karki", role="branch_manager",
+                  hashed_pin=hash_pin("1234"), branch_id=branch.id, is_active=True)
+        s.add_all([fo, bm])
         client = Client(member_id="M-001", name="Sita Thapa", phone_number="+977-9800000001",
                         outstanding_balance=45000.0, due_amount=2500.0, status="active")
         s.add(client)
