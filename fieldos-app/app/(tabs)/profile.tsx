@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image } from 'rea
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
-import { useFieldOSStore } from '../../store/useFieldOSStore';
+import { orgName, useFieldOSStore } from '../../store/useFieldOSStore';
 import { AppHeader } from '../../components/fieldos/AppHeader';
 import { StatusChip } from '../../components/fieldos/StatusChip';
 import { PrivacyNoteCard } from '../../components/fieldos/PrivacyNoteCard';
@@ -164,7 +164,7 @@ export default function ProfileScreen() {
             <Ionicons name="log-out-outline" size={18} color={colors.white} />
             <Text style={styles.logoutText}>{t('secureLogout')}</Text>
           </TouchableOpacity>
-          <Text style={styles.versionText}>FieldOS Nepal v3.0.0</Text>
+          <Text style={styles.versionText}>{orgName()} Nepal v3.0.0</Text>
         </View>
       </ScrollView>
     </View>

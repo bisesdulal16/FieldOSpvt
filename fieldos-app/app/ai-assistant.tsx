@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
 import { AppHeader } from '../components/fieldos/AppHeader';
 import { useTranslation } from '../i18n';
+import { orgName } from '../store/useFieldOSStore';
 import {
   askFieldOS,
   getConversationHistory,
@@ -121,7 +122,7 @@ export default function AIAssistantScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
       <AppHeader
-        title={t('aiAssistant')}
+        title={t('aiAssistant', { _o: orgName() })}
         leftAction={
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="chevron-back" size={20} color={colors.navy} />
@@ -183,7 +184,7 @@ export default function AIAssistantScreen() {
             <View style={styles.welcomeIcon}>
               <Ionicons name="sparkles" size={32} color={colors.navy} />
             </View>
-            <Text style={styles.welcomeTitle}>{t('aiAssistantWelcome')}</Text>
+            <Text style={styles.welcomeTitle}>{t('aiAssistantWelcome', { _o: orgName() })}</Text>
             <Text style={styles.welcomeDesc}>
               {t('aiAssistantDesc')}
             </Text>

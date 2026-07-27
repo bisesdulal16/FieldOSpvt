@@ -3092,7 +3092,7 @@ function SecurityOverviewView({ enabled }: { enabled: boolean }) {
           <Shield className="h-5 w-5 text-green-600" /> Security Overview
           <Badge variant="secondary" className="ml-2 text-xs bg-amber-100 text-amber-800">Demo Reference</Badge>
         </h2>
-        <p className="text-sm text-gray-500 mt-1">FieldOS security posture and compliance</p>
+        <p className="text-sm text-gray-500 mt-1">Asha security posture and compliance</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -3210,7 +3210,7 @@ function ThreatModelView({ enabled }: { enabled: boolean }) {
           <ShieldAlert className="h-5 w-5 text-red-500" /> STRIDE Threat Model
           <Badge variant="secondary" className="ml-2 text-xs bg-amber-100 text-amber-800">Demo Reference</Badge>
         </h2>
-        <p className="text-sm text-gray-500 mt-1">FieldOS threat analysis and mitigation status</p>
+        <p className="text-sm text-gray-500 mt-1">Asha threat analysis and mitigation status</p>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -3285,7 +3285,7 @@ function DataFlowView({ enabled }: { enabled: boolean }) {
           <GitBranch className="h-5 w-5 text-green-600" /> Data Flow Diagram
           <Badge variant="secondary" className="ml-2 text-xs bg-amber-100 text-amber-800">Demo Reference</Badge>
         </h2>
-        <p className="text-sm text-gray-500 mt-1">FieldOS data architecture and encryption</p>
+        <p className="text-sm text-gray-500 mt-1">Asha data architecture and encryption</p>
       </div>
 
       {/* Visual Flow */}
@@ -3732,10 +3732,10 @@ function IncidentResponseView({ enabled }: { enabled: boolean }) {
   ];
 
   const contacts = [
-    { name: 'IT Security Lead', phone: '+977-1-555-0100', email: 'security@fieldos.com.np' },
+    { name: 'IT Security Lead', phone: '+977-1-555-0100', email: 'security@asha.org.np' },
     { name: 'Nepal Rastra Bank (NRB)', phone: '+977-1-441-0158', email: 'supervision@nrb.org.np' },
-    { name: 'FieldOS CTO', phone: '+977-1-555-0200', email: 'cto@fieldos.com.np' },
-    { name: 'Data Protection Officer', phone: '+977-1-555-0300', email: 'dpo@fieldos.com.np' },
+    { name: 'Asha CTO', phone: '+977-1-555-0200', email: 'cto@asha.org.np' },
+    { name: 'Data Protection Officer', phone: '+977-1-555-0300', email: 'dpo@asha.org.np' },
   ];
 
   return (
@@ -3810,7 +3810,7 @@ function IncidentResponseView({ enabled }: { enabled: boolean }) {
         <CardContent className="p-4 pt-0 space-y-3">
           <div className="p-3 rounded-lg bg-red-50 border border-red-100">
             <p className="text-xs font-semibold text-red-700 mb-1">P1 — Data Breach Notification</p>
-            <p className="text-xs text-red-600">URGENT: Potential data security incident detected in FieldOS. Branch: [branch]. Impact: [scope]. Response team activated. ETA: 15 min.</p>
+            <p className="text-xs text-red-600">URGENT: Potential data security incident detected in Asha. Branch: [branch]. Impact: [scope]. Response team activated. ETA: 15 min.</p>
           </div>
           <div className="p-3 rounded-lg bg-amber-50 border border-amber-100">
             <p className="text-xs font-semibold text-amber-700 mb-1">P2 — Device Compromise</p>
@@ -3847,7 +3847,7 @@ function PoliciesView({ enabled }: { enabled: boolean }) {
       version: 'v3.0',
       updated: '2025-11-15',
       sections: [
-        { title: '1. Data Collection', content: 'FieldOS collects only data necessary for microfinance operations: client identity (name, photo, citizenship), loan details, collection records, and GPS check-in coordinates. All collection requires explicit client consent.' },
+        { title: '1. Data Collection', content: 'Asha collects only data necessary for microfinance operations: client identity (name, photo, citizenship), loan details, collection records, and GPS check-in coordinates. All collection requires explicit client consent.' },
         { title: '2. Consent Management', content: 'Clients must provide verbal and digital consent before data collection. Consent can be revoked at any time by contacting the branch. Biometric data (face verification) requires separate explicit consent.' },
         { title: '3. Data Minimization', content: 'API responses return only fields necessary for the requesting role. Field officers see their assigned clients only. PII is masked in audit logs (partial name, no full citizenship number).' },
         { title: '4. Data Subject Rights', content: 'Clients can request data access, correction, or deletion per NRB Directive on Digital Payment. Requests processed within 72 hours by the Data Protection Officer.' },
@@ -3880,7 +3880,7 @@ function PoliciesView({ enabled }: { enabled: boolean }) {
           <BookOpen className="h-5 w-5 text-green-600" /> Security Policies
           <Badge variant="secondary" className="ml-2 text-xs bg-amber-100 text-amber-800">Demo Reference</Badge>
         </h2>
-        <p className="text-sm text-gray-500 mt-1">FieldOS security and compliance policies</p>
+        <p className="text-sm text-gray-500 mt-1">Asha security and compliance policies</p>
       </div>
 
       {/* Tabs */}
@@ -3966,7 +3966,7 @@ function PenTestChecklistView({ enabled }: { enabled: boolean }) {
           <ListChecks className="h-5 w-5 text-green-600" /> Pen Test Checklist
           <Badge variant="secondary" className="ml-2 text-xs bg-amber-100 text-amber-800">Demo Reference</Badge>
         </h2>
-        <p className="text-sm text-gray-500 mt-1">OWASP Top 10 mapped to FieldOS</p>
+        <p className="text-sm text-gray-500 mt-1">OWASP Top 10 mapped to Asha</p>
       </div>
 
       {/* Summary */}
@@ -4344,7 +4344,7 @@ function PilotOverviewView({ enabled }: { enabled: boolean }) {
   if (error) return <ErrorState message={error} onRetry={refetch} />;
 
   const mock = data || {
-    pilot_name: 'FieldOS Nepal Pilot v1.0',
+    pilot_name: 'Asha Nepal Pilot v1.0',
     institution: 'Nepal Microfinance Institution',
     phase: 'preparation',
     start_date: '2025-06-15',
@@ -4707,7 +4707,7 @@ function PilotDocumentsView({ enabled }: { enabled: boolean }) {
                 <div key={i} className="border-l-4 border-cyan-200 pl-4 py-2">
                   <h4 className="text-sm font-semibold text-gray-800">{i + 1}. {section}</h4>
                   <p className="text-xs text-gray-500 mt-1">
-                    This section covers the details of {section.toLowerCase()} for the FieldOS Nepal pilot program.
+                    This section covers the details of {section.toLowerCase()} for the Asha Nepal pilot program.
                     Content will be loaded from the backend pilot endpoint for document ID: {expanded.id}.
                   </p>
                 </div>
@@ -5027,7 +5027,7 @@ function PilotFeedbackView({ enabled }: { enabled: boolean }) {
     { id: 'q2', label: 'How satisfied are you with the collection workflow?', field: 'collection_satisfaction' },
     { id: 'q3', label: 'How reliable is the offline sync feature?', field: 'sync_reliability' },
     { id: 'q4', label: 'How helpful is the GPS check-in feature?', field: 'gps_helpfulness' },
-    { id: 'q5', label: 'Overall satisfaction with FieldOS?', field: 'overall_satisfaction' },
+    { id: 'q5', label: 'Overall satisfaction with Asha?', field: 'overall_satisfaction' },
   ];
 
   const textQuestions = [
@@ -5037,7 +5037,7 @@ function PilotFeedbackView({ enabled }: { enabled: boolean }) {
   ];
 
   const selectQuestion = {
-    id: 'q9', label: 'How likely are you to recommend FieldOS?', field: 'recommend',
+    id: 'q9', label: 'How likely are you to recommend Asha?', field: 'recommend',
     options: ['Very Likely', 'Likely', 'Neutral', 'Unlikely', 'Very Unlikely'],
   };
 
@@ -5593,7 +5593,7 @@ function DataSyncView({ enabled }: { enabled: boolean }) {
     <div className="space-y-6" style={{ opacity: enabled ? 1 : 0, pointerEvents: enabled ? 'auto' : 'none' }}>
       <div>
         <h1 className="text-2xl font-bold text-gray-900">CBS Data Sync</h1>
-        <p className="text-sm text-gray-500 mt-1">Bring the institution&apos;s client/loan list in from their core-banking export, and send the day&apos;s collections back out as a postings file. Read-first — FieldOS never writes to the CBS directly.</p>
+        <p className="text-sm text-gray-500 mt-1">Bring the institution&apos;s client/loan list in from their core-banking export, and send the day&apos;s collections back out as a postings file. Read-first — Asha never writes to the CBS directly.</p>
       </div>
 
       {result && <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-800">{result}</div>}

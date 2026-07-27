@@ -42,8 +42,8 @@ const NOTIFICATIONS = [
     icon: Settings, iconColor: colors.gray500,
     title: 'App update available',
     titleNe: 'एप अपडेट उपलब्ध',
-    description: 'FieldOS Nepal v2.2.0 — Security improvements',
-    descriptionNe: 'FieldOS Nepal v2.2.0 — सुरक्षा सुधार',
+    description: 'Asha Nepal v2.2.0 — Security improvements',
+    descriptionNe: 'Asha Nepal v2.2.0 — सुरक्षा सुधार',
     time: '3h ago', filter: 'system',
   },
   {

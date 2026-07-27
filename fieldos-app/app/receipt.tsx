@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Share } from 'rea
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
-import { useFieldOSStore } from '../store/useFieldOSStore';
+import { orgName, useFieldOSStore } from '../store/useFieldOSStore';
 import { useTranslation } from '../i18n';
 import { AppHeader } from '../components/fieldos/AppHeader';
 import { StatusChip } from '../components/fieldos/StatusChip';
@@ -39,7 +39,7 @@ export default function DigitalReceiptScreen() {
 
   const handleShareReceipt = async () => {
     const lines = [
-      'FieldOS — Collection Receipt',
+      `${orgName()} — Collection Receipt`,
       `Receipt: ${receiptId}`,
       `Client: ${client.name} (${client.memberId})`,
       `Amount: NPR ${displayAmount.toLocaleString()}`,

@@ -13,27 +13,46 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "FieldOS Nepal — Branch Manager Dashboard",
-  description: "Branch Manager Dashboard for FieldOS Nepal — Real-time monitoring of field operations, staff activity, collections, and compliance for microfinance operations.",
-  keywords: ["FieldOS", "Nepal", "microfinance", "branch manager", "dashboard", "field operations", "collections"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
-  openGraph: {
-    title: "FieldOS Nepal — Branch Manager Dashboard",
-    description: "Real-time monitoring dashboard for microfinance field operations in Nepal.",
-    url: "https://chat.z.ai",
-    siteName: "FieldOS Nepal",
-    type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "FieldOS Nepal — Branch Manager Dashboard",
-    description: "Real-time monitoring dashboard for microfinance field operations in Nepal.",
-  },
-};
+/** Fetch branding at runtime so the dashboard is white-label ready. */
+async function getBranding() {
+  try {
+    const res = await fetch(`${process.env.FIELDOS_API_URL || 'http://localhost:8000/api/v1'}/branding`, { next: { revalidate: 3600 } });
+    if (res.ok) {
+      const data = await res.json();
+      return data.data;
+    }
+  } catch {}
+  return null;
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const b = await getBranding();
+  const org = b?.org_name || 'Asha';
+  const tagline = b?.tagline || 'Nepal';
+  const suffix = b?.product_suffix || 'Branch Manager Dashboard';
+  const fullName = `${org} ${tagline} — ${suffix}`;
+  return {
+    title: fullName,
+    description: `Branch Manager Dashboard for ${org} ${tagline} — Real-time monitoring of field operations, staff activity, collections, and compliance for microfinance operations.`,
+    keywords: [org, tagline, "microfinance", "branch manager", "dashboard", "field operations", "collections"],
+    authors: [{ name: "Z.ai Team" }],
+    icons: {
+      icon: b?.logo_url || undefined,
+    },
+    openGraph: {
+      title: fullName,
+      description: `Real-time monitoring dashboard for microfinance field operations in ${tagline}.`,
+      url: "https://chat.z.ai",
+      siteName: `${org} ${tagline}`,
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: fullName,
+      description: `Real-time monitoring dashboard for microfinance field operations in ${tagline}.`,
+    },
+  };
+}
 
 export default function RootLayout({
   children,

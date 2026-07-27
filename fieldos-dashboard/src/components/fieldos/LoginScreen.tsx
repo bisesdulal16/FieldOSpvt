@@ -3,10 +3,12 @@
 import React from 'react';
 import { ShieldCheck, Fingerprint, Eye, EyeOff, Lock, Mountain } from 'lucide-react';
 import { useFieldOSStore } from '@/store/fieldos-store';
+import { useBranding } from '@/lib/useManagerAPI';
 import { SecurityTrustCard, PrimaryButton, SecondaryButton, colors } from './shared';
 
 export function LoginScreen() {
   const { navigate, showPassword, togglePassword, language } = useFieldOSStore();
+  const branding = useBranding();
   const isNe = language === 'ne';
 
   const handleLogin = () => navigate('dashboard');
@@ -21,8 +23,8 @@ export function LoginScreen() {
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-2 shadow-lg" style={{ background: colors.navy }}>
             <Mountain size={28} className="text-white" />
           </div>
-          <h1 className="text-xl font-bold" style={{ color: colors.navy }}>FieldOS</h1>
-          <span className="text-xs font-bold" style={{ color: colors.orange }}>NEPAL</span>
+          <h1 className="text-xl font-bold" style={{ color: colors.navy }}>{branding.org_name}</h1>
+          <span className="text-xs font-bold" style={{ color: colors.orange }}>{branding.tagline?.toUpperCase()}</span>
         </div>
         <p className="text-xs text-gray-500 mb-1">{isNe ? 'अाशा लघुवित्त वित्तीय संस्था' : 'Asha Laghubitta'}</p>
 
@@ -98,7 +100,7 @@ export function LoginScreen() {
 
       {/* Footer */}
       <div className="text-center py-3 px-4">
-        <p className="text-[9px] text-gray-400">FieldOS Nepal v2.1.0</p>
+        <p className="text-[9px] text-gray-400">{branding.org_name} Nepal v2.1.0</p>
         <p className="text-[9px] text-gray-400">{isNe ? 'अधिकृत कर्मचारी मात्र' : 'Authorized personnel only'}</p>
       </div>
     </div>

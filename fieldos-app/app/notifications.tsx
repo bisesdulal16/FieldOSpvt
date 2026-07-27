@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-nati
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../constants';
-import { useFieldOSStore } from '../store/useFieldOSStore';
+import { orgName, useFieldOSStore } from '../store/useFieldOSStore';
 import { AppHeader } from '../components/fieldos/AppHeader';
 import { NotificationCard } from '../components/fieldos/NotificationCard';
 import { SyncChip } from '../components/fieldos/SyncChip';
@@ -39,6 +39,7 @@ interface NotificationItem {
   title: string;
   titleNe: string;
   desc: string;
+  descOrg?: string;
   descNe: string;
   time: string;
   actionLabel?: string;
@@ -51,7 +52,7 @@ interface NotificationItem {
 const STATIC_NOTIFICATIONS: NotificationItem[] = [
   { icon: 'time-outline' as const, iconColor: colors.red, title: 'Promise-to-pay due today', titleNe: 'आज प्रतिबद्धता थप', desc: 'Sunita Kumari Chaudhary — NPR 5,500', descNe: 'सुनिता कुमारी चौधरी — NPR 5,500', time: '2h ago', actionLabel: 'Start Visit', actionLabelNe: 'भेट थाल्नुहोस्', screen: 'client-detail' as const, filter: 'tasks' },
   { icon: 'person-outline' as const, iconColor: colors.navy, title: 'Manager assigned task', titleNe: 'प्रबन्धकले कार्य दिए', desc: 'Visit Ramesh Thapa for KYC', descNe: 'रमेश थापालाई भेट गर्नुहोस्', time: '1h ago', actionLabel: 'View Task', actionLabelNe: 'कार्य हेर्नुहोस्', screen: 'due-collections' as const, filter: 'tasks' },
-  { icon: 'settings-outline' as const, iconColor: colors.gray500, title: 'App update available', titleNe: 'एप अपडेट', desc: 'FieldOS Nepal v2.2.0', descNe: 'v2.2.0 — सुरक्षा सुधार', time: '3h ago', filter: 'system' },
+  { icon: 'settings-outline' as const, iconColor: colors.gray500, title: 'App update available', titleNe: 'एप अपडेट', descOrg: `${orgName()} Nepal v2.2.0`, descNe: 'v2.2.0 — सुरक्षा सुधार', time: '3h ago', filter: 'system' },
   { icon: 'warning-outline' as const, iconColor: colors.red, title: 'Overdue alert', titleNe: 'अतिरिक्त चेतावनी', desc: 'Sita Devi Sah is 15 days overdue', descNe: 'सीता देवी साह १५ दिन अतिरिक्त', time: '5h ago', actionLabel: 'View Client', actionLabelNe: 'क्लाइन्ट हेर्नुहोस्', screen: 'client-detail' as const, filter: 'alerts' },
   { icon: 'document-text-outline' as const, iconColor: colors.navy, title: 'Center meeting reminder', titleNe: 'बैठक स्मरण', desc: 'Kalika Women Center — Tomorrow 10AM', descNe: 'कालिका महिला — भोलि १०:००', time: '6h ago', actionLabel: 'View', actionLabelNe: 'हेर्नुहोस्', screen: 'center-meeting' as const, filter: 'tasks' },
   { icon: 'shield-checkmark' as const, iconColor: colors.green, title: 'Security audit completed', titleNe: 'सुरक्षा अडिट पूरा', desc: 'No issues found', descNe: 'कुनै मुद्दा भेटिएन', time: '1d ago', filter: 'system' },
@@ -168,7 +169,7 @@ export default function NotificationsScreen() {
                   icon={notif.icon}
                   iconColor={notif.iconColor}
                   title={isNe ? notif.titleNe : notif.title}
-                  description={isNe ? notif.descNe : notif.desc}
+                  description={isNe ? notif.descNe : (notif.descOrg ?? notif.desc)}
                   time={notif.time}
                   actionLabel={notif.actionLabel ? (isNe ? notif.actionLabelNe : notif.actionLabel) : undefined}
                   onAction={notif.screen ? () => {

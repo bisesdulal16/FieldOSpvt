@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fontSize, spacing } from '../../constants';
-import { useFieldOSStore } from '../../store/useFieldOSStore';
+import { orgName, brandFullName, useFieldOSStore } from '../../store/useFieldOSStore';
 
 interface AppHeaderProps {
   title: string;
@@ -32,8 +32,8 @@ export function AppHeader({ title, showBack, leftAction, rightAction }: AppHeade
             <View style={styles.logoBox}>
               <Text style={styles.logoText}>F</Text>
             </View>
-            <Text style={styles.logoLabel}>FieldOS</Text>
-            <Text style={styles.logoSublabel}>NEPAL</Text>
+            <Text style={styles.logoLabel}>{orgName()}</Text>
+            <Text style={styles.logoSublabel}>{brandFullName()}</Text>
           </View>
         )}
         {showBack && <Text style={styles.titleText}>{title}</Text>}

@@ -10,6 +10,7 @@ import {
   Phone, FileText, Calendar, Flag, Info, CircleDot
 } from 'lucide-react';
 import { useFieldOSStore, type ScreenName } from '@/store/fieldos-store';
+import { useBranding } from '@/lib/useManagerAPI';
 
 // ─── Design Tokens ───────────────────────────────────────────────
 export const colors = {
@@ -48,6 +49,7 @@ export function AppHeader({ title, showBack, rightAction, hideNav }: {
   hideNav?: boolean;
 }) {
   const { goBack, toggleLanguage, language } = useFieldOSStore();
+  const branding = useBranding();
   return (
     <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-100">
       <div className="flex items-center gap-2 flex-1">
@@ -61,8 +63,8 @@ export function AppHeader({ title, showBack, rightAction, hideNav }: {
             <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: colors.navy }}>
               <span className="text-white text-xs font-bold">F</span>
             </div>
-            <span className="text-sm font-bold" style={{ color: colors.navy }}>FieldOS</span>
-            <span className="text-xs font-semibold" style={{ color: colors.orange }}>NEPAL</span>
+            <span className="text-sm font-bold" style={{ color: colors.navy }}>{branding.org_name}</span>
+            <span className="text-xs font-semibold" style={{ color: colors.orange }}>{branding.tagline?.toUpperCase()}</span>
           </div>
         )}
         {showBack && <span className="font-semibold text-gray-800 text-sm">{title}</span>}

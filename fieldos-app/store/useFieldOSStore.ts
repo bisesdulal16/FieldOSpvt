@@ -1,5 +1,57 @@
 import { create } from 'zustand';
 import { router } from 'expo-router';
+
+// ─── Branding (white-label) ──────────────────────────────────────
+interface Branding {
+  org_name: string;
+  org_name_ne: string;
+  tagline: string;
+  product_suffix: string;
+  primary_color: string;
+  accent_color: string;
+  logo_url: string;
+}
+
+let cachedBranding: Branding | null = null;
+
+export async function fetchBranding(): Promise<Branding> {
+  if (cachedBranding) return cachedBranding;
+  try {
+    const baseUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    const res = await fetch(`${baseUrl}/branding`, { cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      cachedBranding = json.data;
+      return cachedBranding;
+    }
+  } catch { /* branding is non-critical — use defaults */ }
+  return defaultBranding();
+}
+
+function defaultBranding(): Branding {
+  if (!cachedBranding) {
+    cachedBranding = {
+      org_name: 'FieldOS',
+      org_name_ne: 'फिल्डओएस',
+      tagline: 'Nepal',
+      product_suffix: 'Branch Manager Dashboard',
+      primary_color: '#0B1B3A',
+      accent_color: '#F59E0B',
+      logo_url: '',
+    };
+  }
+  return cachedBranding;
+}
+
+export function orgName(): string {
+  return (cachedBranding?.org_name || 'FieldOS').trim();
+}
+
+export function brandFullName(): string {
+  const n = (cachedBranding?.org_name || 'FieldOS').trim();
+  const t = cachedBranding?.tagline;
+  return t ? `${n} ${t.toUpperCase()}` : n.toUpperCase();
+}
 import type {
   FaceVerificationContext,
   SyncStatus,
