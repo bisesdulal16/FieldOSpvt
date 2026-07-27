@@ -1097,7 +1097,7 @@ async def get_audit_logs(
     try:
         # AuditLog.user_id → users.branch_id. Scope via subquery on user→branch.
         if can_see_all_branches(current_user):
-            base_stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+            base_stmt = select(AuditLog, User.staff_id.label("user_staff")).outerjoin(User, AuditLog.user_id == User.id).order_by(AuditLog.created_at.desc())
         else:
             scoped_user_ids = (
                 select(User.id).where(and_(
@@ -1105,16 +1105,13 @@ async def get_audit_logs(
                     User.is_active == True,  # noqa: E712
                 ))
             )
-            base_stmt = select(AuditLog).where(AuditLog.user_id.in_(scoped_user_ids)).order_by(AuditLog.created_at.desc())
+            base_stmt = select(AuditLog, User.staff_id.label("user_staff")).where(AuditLog.user_id.in_(scoped_user_ids)).outerjoin(User, AuditLog.user_id == User.id).order_by(AuditLog.created_at.desc())
 
         if action_type:
             base_stmt = base_stmt.where(AuditLog.action_type == action_type)
 
         base_stmt = base_stmt.limit(limit)
-        stmt_full = (
-            base_stmt.outerjoin(User, AuditLog.user_id == User.id)
-        )
-        result = await db.execute(stmt_full)
+        result = await db.execute(base_stmt)
         rows = result.all()
 
         logs_data = []
@@ -1178,13 +1175,13 @@ async def get_receipt_notifications(
                 .order_by(SmsNotification.created_at.desc())
             )
         else:
-            scoped_coll_ids = (
-                select(Collection.id).where(Collection.branch_id == current_user.branch_id)
+            scoped_receipts = (
+                select(Collection.receipt_id).where(Collection.branch_id == current_user.branch_id)
             )
             base_stmt = (
                 select(SmsNotification, Client.name.label("client_name"), Client.member_id.label("member_id"))
                 .outerjoin(Client, SmsNotification.client_id == Client.id)
-                .where(SmsNotification.collection_id.in_(scoped_coll_ids))
+                .where(SmsNotification.collection_receipt_id.in_(scoped_receipts))
                 .order_by(SmsNotification.created_at.desc())
             )
 

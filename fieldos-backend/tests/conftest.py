@@ -10,6 +10,8 @@ os.environ["SQLITE_PATH"] = "/tmp/fieldos_test.db"
 os.environ["SMS_PROVIDER"] = "log"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key"
 os.environ["ORG_NAME"] = "TestMFI"
+# Tests make many rapid requests — disable rate limiting.
+os.environ["RATE_LIMIT"] = "999999"
 
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -47,8 +49,8 @@ async def _reset_and_seed():
                           installment_frequency="weekly", term_weeks=25, status="pending"))
         # Seed a task assignment for FO-208 → client #1 (so same-branch collections work).
         from app.models.task import TaskAssignment as _TA
-        ta = _TA(task_id="TSK-M-001-0001", user_id=fo.id, client_id=client.id,
-                 due_date="2026-07-27", task_type="collection", status="pending")
+        ta = _TA(user_id=fo.id, client_id=client.id, branch_id=branch.id,
+                 task_date="2026-07-27", task_type="collection", status="pending")
         s.add(ta)
         await s.commit()
 

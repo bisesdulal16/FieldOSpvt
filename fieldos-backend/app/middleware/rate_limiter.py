@@ -1,3 +1,4 @@
+import os
 import time
 import threading
 from collections import defaultdict
@@ -13,8 +14,9 @@ from app.config import settings
 _request_counts: dict[str, list[float]] = defaultdict(list)
 _lock = threading.Lock()
 
-# Default: 100 requests per minute per IP
-RATE_LIMIT = 100
+# Default: 100 requests per minute per IP — raise to 999k in test mode.
+_RATE = os.getenv("RATE_LIMIT")
+RATE_LIMIT = int(_RATE) if _RATE else 100
 WINDOW_SECONDS = 60
 
 

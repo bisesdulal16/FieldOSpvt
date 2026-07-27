@@ -2,7 +2,7 @@ import time
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 
 from app.database import get_db
 from app.models.collection import Collection
@@ -57,7 +57,7 @@ async def create_collection(
 
         if not can_see_all_branches(current_user) and current_user.branch_id is not None:
             from app.models.task import TaskAssignment as _TA
-            # Does this officer have ANY task assignments? Zero = new/off-line (pass-through).
+            # Does this officer have ANY task assignments? Zero = new/off-line.
             has_any_ta = await db.execute(
                 select(func.count()).select_from(_TA)
                 .where(_TA.user_id == current_user.id)
@@ -74,6 +74,12 @@ async def create_collection(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="This client does not belong to your branch.",
                     )
+            else:
+                # No tasks assigned → reject (branch managers without tasks cannot collect cross-branch)
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This client does not belong to your branch.",
+                )
 
         current_outstanding = float(client.outstanding_balance or 0.0)
         # Hard cap: a collection can never exceed the outstanding balance. This blocks

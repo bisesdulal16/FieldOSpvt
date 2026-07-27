@@ -44,19 +44,25 @@ async def create_visit_checkin(
 
             # Check the client has task assignments in this officer's branch.
             # Zero task assignments total = officer has no book yet (new officer), allow pass-through.
-            from app.models.task import TaskAssignment as _TA_
+            from sqlalchemy import and_ as _and_
             has_any_ta = await db.execute(
-                select(func.count()).select_from(_TA_)
-                .where(_TA_.user_id == current_user.id)
+                _sel(func.count()).select_from(_TA)
+                .where(_TA.user_id == current_user.id)
             )
             if has_any_ta.scalar_one_or_none():
                 branch_check = await db.execute(
-                _sel(_TA.client_id).where(_and_(
-                    _TA.client_id == request.client_id,
-                    _TA.branch_id == current_user.branch_id,
-                )).limit(1)
-            )
-            if not branch_check.scalar_one_or_none():
+                    _sel(_TA.client_id).where(_and_(
+                        _TA.client_id == request.client_id,
+                        _TA.branch_id == current_user.branch_id,
+                    )).limit(1)
+                )
+                if not branch_check.scalar_one_or_none():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="This client does not belong to your branch.",
+                    )
+            else:
+                # No tasks assigned → reject (branch managers without tasks cannot collect cross-branch)
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="This client does not belong to your branch.",
@@ -97,6 +103,8 @@ async def create_visit_checkin(
             },
             timestamp=int(time.time()),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Create visit checkin error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Visit checkin creation failed")

@@ -48,8 +48,8 @@ async def _make_branch_b():
 
         # Seed a task assignment for FO-B01 → client B with branch_id (so same-branch writes work).
         from app.models.task import TaskAssignment as _TA
-        ta = _TA(task_id="TSK-B-001-0001", user_id=bfo_user.id,
-                 client_id=client_b.id, due_date="2026-07-27", task_type="collection",
+        ta = _TA(user_id=bfo_user.id,
+                 client_id=client_b.id, task_date="2026-07-27", task_type="collection",
                  status="pending", branch_id=branch_b.id)
         s.add(ta)
         result = {"branch_b_id": branch_b.id, "client_b_id": client_b.id}
