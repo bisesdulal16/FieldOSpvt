@@ -137,6 +137,56 @@ async def test_day_start_allowed_on_office_network(client: AsyncClient, monkeypa
     assert resp.json()["data"]["ip_verified"] is True
 
 
+# ── Day-start face-match gate ────────────────────────────────────────────
+
+async def test_day_start_face_gate_off_by_default_allows_failed_match(client: AsyncClient):
+    # Default: DAY_START_FACE_GATE OFF → face-match is informational, a failed
+    # match (face_verified=False) is recorded but does NOT block the day.
+    token = await login(client, "FO-208")
+    resp = await client.post(
+        "/api/v1/day-start/", headers=auth(token),
+        json={"face_verified": False, "face_similarity": 0.31},
+    )
+    assert resp.status_code == 200
+
+
+async def test_day_start_blocked_on_face_mismatch(client: AsyncClient, monkeypatch):
+    # With the master switch ON, a failed on-device face-match must be blocked 403.
+    from app.routers import day_start as day_start_router
+    monkeypatch.setattr(day_start_router.settings, "DAY_START_FACE_GATE", True)
+    token = await login(client, "FO-208")
+    resp = await client.post(
+        "/api/v1/day-start/", headers=auth(token),
+        json={"face_verified": False, "face_similarity": 0.31},
+    )
+    assert resp.status_code == 403
+
+
+async def test_day_start_face_gate_allows_match(client: AsyncClient, monkeypatch):
+    from app.routers import day_start as day_start_router
+    monkeypatch.setattr(day_start_router.settings, "DAY_START_FACE_GATE", True)
+    token = await login(client, "FO-208")
+    resp = await client.post(
+        "/api/v1/day-start/", headers=auth(token),
+        json={"face_verified": True, "face_similarity": 0.83},
+    )
+    assert resp.status_code == 200
+
+
+async def test_day_start_face_gate_allows_photo_proof_fallback(client: AsyncClient, monkeypatch):
+    # face_verified=None means the device couldn't run the model and fell back to
+    # the selfie photo-proof — that is NOT a failed match, so it must be allowed
+    # through even with the gate ON (matches the IP gate's opt-in shape).
+    from app.routers import day_start as day_start_router
+    monkeypatch.setattr(day_start_router.settings, "DAY_START_FACE_GATE", True)
+    token = await login(client, "FO-208")
+    resp = await client.post(
+        "/api/v1/day-start/", headers=auth(token),
+        json={"selfie_data_uri": "data:image/png;base64,AAAA", "face_verified": None},
+    )
+    assert resp.status_code == 200
+
+
 # ── Officer attribution survives standalone (no task_id) actions ──────────
 # Regression for the pilot "manager saw visits_completed = 0" bug: Change-client /
 # standalone visits and collections carry no task_id, so any count that joins through

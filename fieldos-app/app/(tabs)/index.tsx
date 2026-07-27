@@ -126,8 +126,17 @@ export default function DashboardScreen() {
         ),
       );
     }
-    // Face-match is INFORMATIONAL for the pilot (the day-start selfie is the control):
-    // record the result + score for the manager, but never block the officer's day on it.
+    // Face-match GATES clock-in: a failed match stops the day here (and the
+    // server enforces the same via DAY_START_FACE_GATE, so a tampered client
+    // can't skip it). The score is still sent along for the manager's record.
+    if (!face.verified) {
+      if (!FACE_DEBUG) {
+        // In debug mode the score alert above already told the officer it failed.
+        Alert.alert(t('faceNoMatchTitle'), t('faceNoMatchMsg'));
+      }
+      setStartingDay(false);
+      return;
+    }
     await finishDayStart(face);
   }, [finishDayStart, t]);
 
