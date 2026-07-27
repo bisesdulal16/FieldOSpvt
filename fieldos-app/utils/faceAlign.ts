@@ -153,8 +153,11 @@ export function warpToTemplate(
   size: number = 112,
 ): Uint8Array {
   'worklet';
-  // invert the 2×3 affine [a b tx; c d ty]
-  const [a, b, tx, c, d, ty] = m;
+  // invert the 2×3 affine [a b tx; c d ty]. Index directly — array destructuring
+  // makes Babel inject a `_slicedToArray` helper that isn't a worklet, which the
+  // worklet runtime rejects ("Regular javascript function '_slicedToArray' cannot
+  // be shared"). Same class of trap as the inlined SVD helpers above.
+  const a = m[0], b = m[1], tx = m[2], c = m[3], d = m[4], ty = m[5];
   const det = a * d - b * c;
   const idet = det !== 0 ? 1 / det : 0;
   const ia = d * idet, ib = -b * idet;
