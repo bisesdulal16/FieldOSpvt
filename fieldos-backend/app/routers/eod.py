@@ -61,6 +61,7 @@ async def create_eod_report(
                 "id": report.id,
                 "report_date": report.report_date,
                 "officer_id": report.officer_id,
+                "branch_id": report.branch_id,
                 "total_collections": report.total_collections,
                 "total_visits": report.total_visits,
                 "pending_count": report.pending_count,

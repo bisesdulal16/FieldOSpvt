@@ -28,24 +28,30 @@ async def _make_branch_b():
         branch_b = Branch(branch_id="BR-TEST-B", name="Test Branch B", office_ip="127.0.0.1")
         s.add(branch_b)
         await s.flush()
-        s.add_all([
-            User(staff_id="FO-B01", name="Bimala Rai", role="field_officer",
-                 hashed_pin=hash_pin("1234"), branch_id=branch_b.id, is_active=True),
-            User(staff_id="BM-B01", name="Krishna Lama", role="branch_manager",
-                 hashed_pin=hash_pin("1234"), branch_id=branch_b.id, is_active=True),
-            # Admin/HO: no branch pinning — sees all branches.
-            User(staff_id="AD-001", name="HO Admin", role="admin",
-                 hashed_pin=hash_pin("1234"), branch_id=None, is_active=True),
-            # A branch manager with NO branch assigned — must fail closed (see nothing).
-            User(staff_id="BM-NOBR", name="Orphan Manager", role="branch_manager",
-                 hashed_pin=hash_pin("1234"), branch_id=None, is_active=True),
-        ])
+
+        bfo_user = User(staff_id="FO-B01", name="Bimala Rai", role="field_officer",
+                         hashed_pin=hash_pin("1234"), branch_id=branch_b.id, is_active=True)
+        bm_user = User(staff_id="BM-B01", name="Krishna Lama", role="branch_manager",
+                        hashed_pin=hash_pin("1234"), branch_id=branch_b.id, is_active=True)
+        ad_user = User(staff_id="AD-001", name="HO Admin", role="admin",
+                        hashed_pin=hash_pin("1234"), branch_id=None, is_active=True)
+        orph_user = User(staff_id="BM-NOBR", name="Orphan Manager", role="branch_manager",
+                         hashed_pin=hash_pin("1234"), branch_id=None, is_active=True)
+        s.add_all([bfo_user, bm_user, ad_user, orph_user])
+
         # NOTE: Client has no branch_id yet (tracked follow-up) — collections carry the
         # branch via the officer, so the client's own branch is irrelevant to these tests.
         client_b = Client(member_id="M-B01", name="Gita Rai (B)", phone_number="+977-9800000099",
                           outstanding_balance=30000.0, due_amount=3000.0, status="active")
         s.add(client_b)
         await s.flush()
+
+        # Seed a task assignment for FO-B01 → client B with branch_id (so same-branch writes work).
+        from app.models.task import TaskAssignment as _TA
+        ta = _TA(task_id="TSK-B-001-0001", user_id=bfo_user.id,
+                 client_id=client_b.id, due_date="2026-07-27", task_type="collection",
+                 status="pending", branch_id=branch_b.id)
+        s.add(ta)
         result = {"branch_b_id": branch_b.id, "client_b_id": client_b.id}
         await s.commit()  # AsyncSessionLocal does NOT auto-commit on context exit
         return result
@@ -160,8 +166,10 @@ async def test_officer_activity_cross_branch_guard(client: AsyncClient):
 
 
 async def _create_promise(client: AsyncClient, token: str, client_id: int, amount: float):
+    # Use today's Nepal date so it matches PTP query (expected_payment_date == today)
+    from app.utils.nepal_time import today_nepal_str
     body = {"client_id": client_id, "task_id": None, "promised_amount": amount,
-            "expected_payment_date": "2026-07-31", "reason": "test",
+            "expected_payment_date": today_nepal_str(), "reason": "test",
             "outstanding_amount": 5000.0}
     r = await client.post("/api/v1/promise-to-pay/", headers=auth(token), json=body)
     assert r.status_code == 200, f"Promise creation failed: {r.text}"

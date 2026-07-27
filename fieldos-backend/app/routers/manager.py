@@ -840,6 +840,7 @@ async def get_eod_reviews(
         )
         stmt = scope_to_branch(stmt, EndOfDayReport, current_user)
         result = await db.execute(stmt)
+        rows = result.all()
 
         submitted_count = 0
         pending_count = 0
@@ -847,15 +848,15 @@ async def get_eod_reviews(
         reviews = []
 
         for eod, officer_name, staff_id in rows:
-            # Determine status
+            # Determine status (use _st to avoid shadowing FastAPI status module)
             if eod.is_submitted:
-                status = "submitted"
+                _st = "submitted"
                 submitted_count += 1
             elif eod.report_date < today:
-                status = "overdue"
+                _st = "overdue"
                 overdue_count += 1
             else:
-                status = "pending"
+                _st = "pending"
                 pending_count += 1
 
             # Count actual collections for this officer on this date (branch-scoped)
@@ -879,7 +880,7 @@ async def get_eod_reviews(
                 "collections_count": collections_count,
                 "collections_npr": round(eod.total_collections, 2),
                 "visits_count": eod.total_visits,
-                "status": status,
+                "status": _st,
                 "submitted_at": str(eod.created_at) if eod.is_submitted else None,
             })
 

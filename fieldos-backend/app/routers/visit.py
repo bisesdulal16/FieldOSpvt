@@ -30,21 +30,29 @@ async def create_visit_checkin(
         if not can_see_all_branches(current_user) and current_user.branch_id is not None:
             from app.models.client import Client as _Client
             from app.models.task import TaskAssignment as _TA
-            from sqlalchemy import select as _sel, and_ as _and_
+            from sqlalchemy import func, select as _sel
 
+            # Check client exists
             client_check = await db.execute(
                 _sel(_Client.id).where(_Client.id == request.client_id)
             )
-            client_obj = client_check.scalar_one_or_none()
-            if not client_obj:
+            if not client_check.scalar_one_or_none():
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Client not found — cannot record a visit.",
                 )
 
-            branch_check = await db.execute(
+            # Check the client has task assignments in this officer's branch.
+            # Zero task assignments total = officer has no book yet (new officer), allow pass-through.
+            from app.models.task import TaskAssignment as _TA_
+            has_any_ta = await db.execute(
+                select(func.count()).select_from(_TA_)
+                .where(_TA_.user_id == current_user.id)
+            )
+            if has_any_ta.scalar_one_or_none():
+                branch_check = await db.execute(
                 _sel(_TA.client_id).where(_and_(
-                    _TA.client_id == client_obj.id,
+                    _TA.client_id == request.client_id,
                     _TA.branch_id == current_user.branch_id,
                 )).limit(1)
             )

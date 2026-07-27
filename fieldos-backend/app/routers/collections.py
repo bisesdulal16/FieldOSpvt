@@ -57,17 +57,23 @@ async def create_collection(
 
         if not can_see_all_branches(current_user) and current_user.branch_id is not None:
             from app.models.task import TaskAssignment as _TA
-            branch_check = await db.execute(
-                select(_TA.client_id).where(and_(
-                    _TA.client_id == client.id,
-                    _TA.branch_id == current_user.branch_id,
-                )).limit(1)
+            # Does this officer have ANY task assignments? Zero = new/off-line (pass-through).
+            has_any_ta = await db.execute(
+                select(func.count()).select_from(_TA)
+                .where(_TA.user_id == current_user.id)
             )
-            if not branch_check.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="This client does not belong to your branch.",
+            if has_any_ta.scalar_one_or_none():
+                branch_check = await db.execute(
+                    select(_TA.client_id).where(and_(
+                        _TA.client_id == client.id,
+                        _TA.branch_id == current_user.branch_id,
+                    )).limit(1)
                 )
+                if not branch_check.scalar_one_or_none():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="This client does not belong to your branch.",
+                    )
 
         current_outstanding = float(client.outstanding_balance or 0.0)
         # Hard cap: a collection can never exceed the outstanding balance. This blocks

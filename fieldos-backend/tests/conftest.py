@@ -46,6 +46,11 @@ async def _reset_and_seed():
         s.add(LoanAccount(client_id=client.id, loan_id="LN-M-001-0001", product_type="micro_loan",
                           principal_amount=40000.0, outstanding_balance=0.0, installment_amount=1738.0,
                           installment_frequency="weekly", term_weeks=25, status="pending"))
+        # Seed a task assignment for FO-208 → client #1 (so same-branch collections work).
+        from app.models.task import TaskAssignment as _TA
+        ta = _TA(task_id="TSK-M-001-0001", user_id=fo.id, client_id=client.id,
+                 due_date="2026-07-27", task_type="collection", status="pending")
+        s.add(ta)
         await s.commit()
 
 
