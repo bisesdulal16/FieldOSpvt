@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
@@ -10,6 +10,7 @@ import { PrivacyNoteCard } from '../../components/fieldos/PrivacyNoteCard';
 import { auditLogout } from '../../services/auditService';
 import { getSetting } from '../../db/repositories/settingsRepo';
 import { logout, clearAllSecureData, formatLastSyncTime, getCurrentUser } from '../../services';
+import { getFaceStatus } from '../../services/faceVerifyService';
 import { useTranslation } from '../../i18n';
 
 // Initials for the avatar from a real name (e.g. "Hari Prasad Koirala" → "HK").
@@ -36,9 +37,14 @@ export default function ProfileScreen() {
   const { t } = useTranslation();
   const [consentGranted, setConsentGranted] = useState(true);
   const [officer, setOfficer] = useState<any>(null); // the real logged-in officer
+  const [facePhoto, setFacePhoto] = useState<string | null>(null); // profile pic from first face enroll
 
   useEffect(() => {
     getCurrentUser().then((u) => u && setOfficer(u)).catch(() => {});
+    // Profile picture is the officer's first-enrollment face selfie (server-side).
+    getFaceStatus()
+      .then((s) => { if (s?.face_photo) setFacePhoto(s.face_photo); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -58,7 +64,11 @@ export default function ProfileScreen() {
       <ScrollView style={styles.body} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
           <View style={styles.profileHeader}>
-            <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{initialsOf(officer?.name)}</Text></View>
+            {facePhoto ? (
+              <Image source={{ uri: facePhoto }} style={styles.profileAvatar} resizeMode="cover" />
+            ) : (
+              <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{initialsOf(officer?.name)}</Text></View>
+            )}
             <View style={{ flex: 1 }}>
               <Text style={styles.profileName}>{officer?.name || t('officerName')}</Text>
               <Text style={styles.profileRole}>{t('fieldOfficer')}</Text>

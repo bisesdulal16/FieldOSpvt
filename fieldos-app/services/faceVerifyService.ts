@@ -97,6 +97,29 @@ export async function getEnrolledTemplate(): Promise<number[] | null> {
   return hydrateFromServer();
 }
 
+export interface FaceStatus {
+  enrolled: boolean;
+  enrolled_at: string | null;
+  dims: number;
+  face_photo: string | null; // profile picture (first-enroll selfie), data URI
+}
+
+/** Fetch the officer's enrollment status incl. profile picture. Null on failure. */
+export async function getFaceStatus(): Promise<FaceStatus | null> {
+  try {
+    const { baseUrl } = getConfig();
+    const token = getAccessToken();
+    const res = await fetch(`${baseUrl}/face/status`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const json = await res.json();
+    return (json?.data as FaceStatus) ?? null;
+  } catch (e) {
+    console.warn('[faceVerify] getFaceStatus failed', e);
+    return null;
+  }
+}
+
 /** Pull the officer's enrolled template from the backend and cache it locally. */
 export async function hydrateFromServer(): Promise<number[] | null> {
   try {

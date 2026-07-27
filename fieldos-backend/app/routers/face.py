@@ -59,17 +59,31 @@ async def enroll_face(
 
     current_user.face_template = json.dumps([round(float(x), 6) for x in body.embedding])
     current_user.face_enrolled_at = now_nepal_iso()
+
+    # First enrollment doubles as the profile picture. Set ONCE — a re-enroll (e.g.
+    # a new phone, or a bad first capture) must not silently replace a photo the
+    # officer/manager already has on file. Manager can clear it to allow a refresh.
+    photo_set = False
+    if body.selfie_data_uri and not current_user.face_photo:
+        current_user.face_photo = body.selfie_data_uri
+        photo_set = True
+
     db.add(current_user)
     await write_audit(
         db, current_user, "face_enrolled",
         entity_type="user", entity_id=str(current_user.id),
-        meta={"dims": dims, "selfie": bool(body.selfie_data_uri)},
+        meta={"dims": dims, "selfie": bool(body.selfie_data_uri), "profile_photo_set": photo_set},
     )
     await db.commit()
 
     return ApiResponse(
         success=True,
-        data={"enrolled": True, "dims": dims, "enrolled_at": current_user.face_enrolled_at},
+        data={
+            "enrolled": True,
+            "dims": dims,
+            "enrolled_at": current_user.face_enrolled_at,
+            "profile_photo_set": photo_set,
+        },
         timestamp=int(time.time()),
     )
 
@@ -96,6 +110,7 @@ async def face_status(
             "enrolled_at": current_user.face_enrolled_at,
             "dims": dims,
             "template": template,  # the officer's own embedding only
+            "face_photo": current_user.face_photo,  # profile picture (first-enroll selfie)
         },
         timestamp=int(time.time()),
     )

@@ -73,6 +73,11 @@ class User(Base):
     # verification itself happens on-device against the locally cached copy.
     face_template: Mapped[str | None] = mapped_column(Text, nullable=True)
     face_enrolled_at: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Profile picture. Set ONCE from the officer's first face enrollment (the aligned
+    # enrollment selfie), so the profile/manager views show a real face without a
+    # separate upload step. Not overwritten on re-enroll — a manager-set photo wins.
+    # Stored as a data URI (base64) for the pilot; move to object storage in prod.
+    face_photo: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     branch = relationship("Branch", back_populates="users")
     # Operations reporting chain (self-referential). `reports` = direct subordinates.

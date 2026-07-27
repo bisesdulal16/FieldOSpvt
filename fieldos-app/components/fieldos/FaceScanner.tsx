@@ -15,6 +15,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { File } from 'expo-file-system';
 import { colors, fontSize, spacing, borderRadius } from '../../constants';
 import { ARC_TEMPLATE_112, similarityTransform, warpToTemplate } from '../../utils/faceAlign';
 
@@ -107,9 +108,10 @@ export interface FaceScannerProps {
   /**
    * Fired with ALL captured frames when `samples` > 1, so the caller can average
    * them (enroll = a stable template, verify = a robust sample). Preferred over
-   * onEmbedding when set.
+   * onEmbedding when set. On enroll, `selfieDataUri` carries a JPEG snapshot of the
+   * face for use as the officer's profile picture (null if the snapshot failed).
    */
-  onEmbeddings?: (embeddings: number[][]) => void;
+  onEmbeddings?: (embeddings: number[][], selfieDataUri?: string | null) => void;
   /** How many frames to capture after liveness passes (default 1). */
   samples?: number;
   onUnavailable: (reason?: FaceUnavailableReason) => void;
@@ -136,6 +138,7 @@ function RealScanner({ mode, onEmbedding, onEmbeddings, samples = 1, onUnavailab
   const { useSharedValue, useRunOnJS } = Worklets;
 
   const device = useCameraDevice('front');
+  const cameraRef = useRef<any>(null);
   const { hasPermission, requestPermission } = useCameraPermission();
   const { resize } = useResizePlugin();
   const { detectFaces } = useFaceDetector({
@@ -199,7 +202,7 @@ function RealScanner({ mode, onEmbedding, onEmbeddings, samples = 1, onUnavailab
     );
   }, []);
 
-  const emit = useRunOnJS((vec: number[]) => {
+  const emit = useRunOnJS(async (vec: number[]) => {
     if (emittedRef.current) return; // already delivered the final batch
     if (FACE_DEBUG) {
       // Norm should be a stable positive number; a flat/near-zero vector or wildly
@@ -218,9 +221,18 @@ function RealScanner({ mode, onEmbedding, onEmbeddings, samples = 1, onUnavailab
     // Got the full batch: deliver once and stop the worklet for good.
     emittedRef.current = true;
     const frames = framesRef.current;
-    if (onEmbeddings) onEmbeddings(frames);
+
+    // On ENROLL, grab a JPEG snapshot of the officer's face to use as their profile
+    // picture (first-enroll only; the server ignores it on re-enroll). Best-effort:
+    // a snapshot failure must never block enrollment — we just enroll without a photo.
+    let selfie: string | null = null;
+    if (mode === 'enroll') {
+      selfie = await captureSelfie(cameraRef.current);
+    }
+
+    if (onEmbeddings) onEmbeddings(frames, selfie);
     else if (onEmbedding) onEmbedding(frames[0]);
-  }, [onEmbedding, onEmbeddings, wantSamples]);
+  }, [onEmbedding, onEmbeddings, wantSamples, mode]);
 
   const frameProcessor = useFrameProcessor((frame: any) => {
     'worklet';
@@ -380,6 +392,7 @@ function RealScanner({ mode, onEmbedding, onEmbeddings, samples = 1, onUnavailab
   return (
     <View style={styles.container}>
       <Camera
+        ref={cameraRef}
         style={StyleSheet.absoluteFill}
         device={device}
         isActive={true}
@@ -405,6 +418,30 @@ function RealScanner({ mode, onEmbedding, onEmbeddings, samples = 1, onUnavailab
       </View>
     </View>
   );
+}
+
+/**
+ * Grab a small JPEG selfie for the profile picture. Uses `takeSnapshot` (a cheap
+ * grab of the current preview frame — works while the frame processor runs, unlike
+ * `takePhoto` which contends for the camera pipeline). Returns a base64 data URI, or
+ * null on any failure — the caller must treat a null as "enroll without a photo",
+ * never as a blocker.
+ */
+async function captureSelfie(camera: any): Promise<string | null> {
+  try {
+    if (!camera?.takeSnapshot) return null;
+    // quality 60 keeps the base64 payload small enough to store inline for the pilot.
+    const snap = await camera.takeSnapshot({ quality: 60 });
+    const path: string | undefined = snap?.path;
+    if (!path) return null;
+    const uri = path.startsWith('file://') ? path : `file://${path}`;
+    const base64 = await new File(uri).base64();
+    if (!base64) return null;
+    return `data:image/jpeg;base64,${base64}`;
+  } catch (e) {
+    console.warn('[FaceScanner] selfie snapshot failed (enrolling without photo)', e);
+    return null;
+  }
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
