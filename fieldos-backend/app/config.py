@@ -48,6 +48,15 @@ class Settings:
     # DAY_START_IP_GATE=true (and register the branch's real public IP) to enforce.
     DAY_START_IP_GATE: bool = os.getenv("DAY_START_IP_GATE", "false").strip().lower() in ("1", "true", "yes", "on")
 
+    # ── Day-start face-match gate (master switch) ─────────────────────────
+    # OFF by default (face-match stays informational — recorded for the manager
+    # but never blocks). When enabled, an officer whose on-device face-match
+    # fails (client sends face_verified=false) is blocked from starting the day
+    # with a 403 — the server enforces it so a tampered client can't skip it.
+    # A device that couldn't run the model (face_verified=None) is NOT blocked:
+    # it falls back to the selfie photo-proof, same as the IP gate's opt-in shape.
+    DAY_START_FACE_GATE: bool = os.getenv("DAY_START_FACE_GATE", "false").strip().lower() in ("1", "true", "yes", "on")
+
     # ── SMS gateway (client receipt notifications) ────────────────────────
     # SMS_PROVIDER=log     → dev/demo: records the message, sends nothing (no gateway needed)
     # SMS_PROVIDER=sparrow → Nepal production via Sparrow SMS (needs token + credits)

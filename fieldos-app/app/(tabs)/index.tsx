@@ -18,7 +18,7 @@ import { fetchAssignedTasks } from '../../services/taskService';
 import { startDayWithVerification, captureSelfie } from '../../services/dayStartService';
 import type { FaceResult } from '../../services/dayStartService';
 import { FaceScanner } from '../../components/fieldos/FaceScanner';
-import { isEnrolled, verifyEmbedding, FACE_MATCH_THRESHOLD } from '../../services/faceVerifyService';
+import { isEnrolled, verifyEmbeddings, FACE_MATCH_THRESHOLD } from '../../services/faceVerifyService';
 
 // Tuning aid: when EXPO_PUBLIC_FACE_DEBUG=true, every clock-in shows the raw
 // similarity score so the threshold can be calibrated on real devices/faces (F4).
@@ -112,9 +112,11 @@ export default function DashboardScreen() {
   }, [startingDay, finishDayStart, t, router]);
 
   // FaceScanner callbacks.
-  const handleFaceEmbedding = useCallback(async (embedding: number[]) => {
+  const handleFaceEmbeddings = useCallback(async (embeddings: number[][]) => {
     setShowFaceScan(false);
-    const face = await verifyEmbedding(embedding);
+    // Average the multi-frame verify sample (kills single-frame luck for an
+    // impostor and smooths a genuine officer's dips) before comparing.
+    const face = await verifyEmbeddings(embeddings);
     const scoreLine = `${t('faceScoreLabel')}: ${face.similarity.toFixed(3)}  (${t('faceThresholdLabel')} ${FACE_MATCH_THRESHOLD})`;
     // Tuning mode: show the score on every attempt so the threshold can be calibrated.
     if (FACE_DEBUG) {
@@ -126,8 +128,17 @@ export default function DashboardScreen() {
         ),
       );
     }
-    // Face-match is INFORMATIONAL for the pilot (the day-start selfie is the control):
-    // record the result + score for the manager, but never block the officer's day on it.
+    // Face-match GATES clock-in: a failed match stops the day here (and the
+    // server enforces the same via DAY_START_FACE_GATE, so a tampered client
+    // can't skip it). The score is still sent along for the manager's record.
+    if (!face.verified) {
+      if (!FACE_DEBUG) {
+        // In debug mode the score alert above already told the officer it failed.
+        Alert.alert(t('faceNoMatchTitle'), t('faceNoMatchMsg'));
+      }
+      setStartingDay(false);
+      return;
+    }
     await finishDayStart(face);
   }, [finishDayStart, t]);
 
@@ -271,7 +282,8 @@ export default function DashboardScreen() {
     return (
       <FaceScanner
         mode="verify"
-        onEmbedding={handleFaceEmbedding}
+        samples={3}
+        onEmbeddings={handleFaceEmbeddings}
         onUnavailable={handleFaceUnavailable}
         onCancel={handleFaceCancel}
       />

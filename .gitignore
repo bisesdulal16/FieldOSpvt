@@ -27,6 +27,11 @@ out/
 android/.gradle/
 android/app/build/
 ios/build/
+# Generated native projects (expo prebuild output) — regenerate with `expo prebuild`
+fieldos-app/android/
+fieldos-app/ios/
+# Local face-alignment scratch/test images
+facetest/
 
 # cache
 .cache/

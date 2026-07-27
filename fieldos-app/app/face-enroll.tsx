@@ -19,10 +19,12 @@ export default function FaceEnrollScreen() {
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const handleEmbedding = async (embedding: number[]) => {
+  const handleEmbeddings = async (embeddings: number[][]) => {
     setScanning(false);
     setSaving(true);
-    const res = await enrollFace(embedding);
+    // Average the multi-frame capture into one stable template (kills single-photo
+    // noise — measured genuine scores swung 0.49–0.89 off a single enroll photo).
+    const res = await enrollFace(embeddings);
     setSaving(false);
     if (res.success) {
       Alert.alert(t('faceEnrollDoneTitle'), t('faceEnrollDoneMsg'), [
@@ -53,7 +55,8 @@ export default function FaceEnrollScreen() {
     return (
       <FaceScanner
         mode="enroll"
-        onEmbedding={handleEmbedding}
+        samples={5}
+        onEmbeddings={handleEmbeddings}
         onUnavailable={handleUnavailable}
         onCancel={() => setScanning(false)}
       />

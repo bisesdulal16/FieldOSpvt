@@ -82,6 +82,23 @@ async def start_day(
     else:
         ip_verified = False  # gate disabled for this branch
 
+    # ── Face-match gate ───────────────────────────────────────────────────
+    # When enabled, a failed on-device face-match blocks the day. face_verified
+    # is None when the device fell back to photo-proof (no model) — that is NOT
+    # a failure, so it's allowed through, matching the IP gate's opt-in shape.
+    if settings.DAY_START_FACE_GATE and body.face_verified is False:
+        await write_audit(
+            db, current_user, "day_start_blocked",
+            entity_type="day_start", entity_id=today_nepal_str(),
+            meta={"source_ip": source_ip, "reason": "face_not_matched",
+                  "face_similarity": body.face_similarity},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Face did not match your enrolled photo. Day not started.",
+        )
+
     record = DayStartRecord(
         officer_id=current_user.id,
         branch_id=current_user.branch_id,

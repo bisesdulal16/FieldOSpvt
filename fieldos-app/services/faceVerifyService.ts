@@ -48,6 +48,30 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return denom ? dot / denom : -1;
 }
 
+/**
+ * Average several embeddings into one L2-normalized centroid.
+ *
+ * A single capture is noisy — the same person's cosine can swing ~0.2 across
+ * frames (measured on real devices: genuine ranged 0.49–0.89 off ONE enroll
+ * photo). Averaging N captures cancels per-frame noise: the genuine centroid
+ * rises and tightens, while an impostor's lucky high frame is pulled back down
+ * toward their true (lower) mean. This is the main lever that opens the
+ * genuine-vs-lookalike gap without swapping the model. Used for both the
+ * enrolled template and the live verify sample.
+ */
+export function averageEmbeddings(embeddings: number[][]): number[] {
+  const valid = embeddings.filter((e) => Array.isArray(e) && e.length > 0);
+  if (valid.length === 0) return [];
+  const dim = valid[0].length;
+  const sum = new Array(dim).fill(0);
+  for (const e of valid) {
+    if (e.length !== dim) continue; // skip a malformed frame rather than corrupt the mean
+    for (let i = 0; i < dim; i++) sum[i] += e[i];
+  }
+  for (let i = 0; i < dim; i++) sum[i] /= valid.length;
+  return l2normalize(sum);
+}
+
 // ─── Local template cache ────────────────────────────────────────
 
 async function cacheTemplate(embedding: number[]): Promise<void> {
@@ -100,10 +124,18 @@ export async function isEnrolled(): Promise<boolean> {
 // ─── Enroll ──────────────────────────────────────────────────────
 
 export async function enrollFace(
-  embedding: number[],
+  embedding: number[] | number[][],
   selfieDataUri?: string | null,
 ): Promise<{ success: boolean; error?: string }> {
-  const normalized = l2normalize(embedding);
+  // Accept a single embedding (legacy) or several captures to average into a
+  // stable centroid template. A number[][] is averaged; a number[] is used as-is.
+  const isMulti = Array.isArray(embedding[0]);
+  const normalized = isMulti
+    ? averageEmbeddings(embedding as number[][])
+    : l2normalize(embedding as number[]);
+  if (!normalized.length) {
+    return { success: false, error: 'No usable face captures to enroll.' };
+  }
   try {
     const { baseUrl } = getConfig();
     const token = getAccessToken();
@@ -136,11 +168,43 @@ export interface FaceVerifyResult {
   reason?: 'no_enrollment' | 'below_threshold' | 'ok';
 }
 
+const FACE_DEBUG =
+  String(process.env.EXPO_PUBLIC_FACE_DEBUG).toLowerCase() === 'true';
+
 /** Compare a freshly-captured embedding to the enrolled template. */
 export async function verifyEmbedding(embedding: number[]): Promise<FaceVerifyResult> {
   const enrolled = await getEnrolledTemplate();
   if (!enrolled) return { verified: false, similarity: -1, reason: 'no_enrollment' };
   const similarity = cosineSimilarity(l2normalize(embedding), enrolled);
   const verified = similarity >= FACE_MATCH_THRESHOLD;
+  if (FACE_DEBUG) {
+    // The number to tune the threshold on: capture same-person and different-person
+    // scores on real officers/cameras. With correct (signed) preprocessing, expect
+    // same-person cosine > ~0.7 and cross-person < ~0.45.
+    console.log(
+      `[faceVerify] cosine=${similarity.toFixed(4)} threshold=${FACE_MATCH_THRESHOLD} → ${verified ? 'PASS' : 'FAIL'}`,
+    );
+  }
+  return { verified, similarity, reason: verified ? 'ok' : 'below_threshold' };
+}
+
+/**
+ * Verify several live captures at once: average them into one sample, then
+ * compare to the enrolled template. Averaging the verify side (like enrollment)
+ * stops an impostor from passing on a single lucky frame — their high frame is
+ * pulled back toward their mean — while smoothing a genuine officer's dips.
+ */
+export async function verifyEmbeddings(embeddings: number[][]): Promise<FaceVerifyResult> {
+  const sample = averageEmbeddings(embeddings);
+  if (!sample.length) return { verified: false, similarity: -1, reason: 'no_enrollment' };
+  const enrolled = await getEnrolledTemplate();
+  if (!enrolled) return { verified: false, similarity: -1, reason: 'no_enrollment' };
+  const similarity = cosineSimilarity(sample, enrolled);
+  const verified = similarity >= FACE_MATCH_THRESHOLD;
+  if (FACE_DEBUG) {
+    console.log(
+      `[faceVerify] avg-of-${embeddings.length} cosine=${similarity.toFixed(4)} threshold=${FACE_MATCH_THRESHOLD} → ${verified ? 'PASS' : 'FAIL'}`,
+    );
+  }
   return { verified, similarity, reason: verified ? 'ok' : 'below_threshold' };
 }
