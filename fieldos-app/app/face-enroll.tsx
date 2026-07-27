@@ -19,12 +19,13 @@ export default function FaceEnrollScreen() {
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const handleEmbeddings = async (embeddings: number[][]) => {
+  const handleEmbeddings = async (embeddings: number[][], selfieDataUri?: string | null) => {
     setScanning(false);
     setSaving(true);
     // Average the multi-frame capture into one stable template (kills single-photo
     // noise — measured genuine scores swung 0.49–0.89 off a single enroll photo).
-    const res = await enrollFace(embeddings);
+    // The selfie (first enroll only) becomes the officer's profile picture server-side.
+    const res = await enrollFace(embeddings, selfieDataUri);
     setSaving(false);
     if (res.success) {
       Alert.alert(t('faceEnrollDoneTitle'), t('faceEnrollDoneMsg'), [

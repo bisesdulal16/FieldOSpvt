@@ -74,6 +74,7 @@ async def create_collection(
             client_id=request.client_id,
             task_id=request.task_id,
             officer_id=current_user.id,  # from the authenticated token, not the body
+            branch_id=current_user.branch_id,  # stamp the officer's branch for scoping (not from body)
             visit_id=request.visit_id,
             amount=amount,
             due_amount=float(request.due_amount) if request.due_amount else 0.0,

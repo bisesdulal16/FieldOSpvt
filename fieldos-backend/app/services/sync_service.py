@@ -55,6 +55,14 @@ async def process_sync_event(
 async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str, payload: dict, authed_officer_id: int | None = None) -> dict[str, Any]:
     # The authenticated officer always wins over any officer_id in the offline payload.
     officer_id = authed_officer_id if authed_officer_id is not None else payload.get("officer_id")
+    # Resolve the syncing officer's branch once, so offline-synced collections/visits/
+    # tasks get the same branch stamp as the direct-POST path (branch scoping, mig 008).
+    # Derived from the trusted officer, never from the offline payload.
+    officer_branch_id = None
+    if officer_id is not None:
+        _u = await session.execute(select(User).where(User.id == officer_id))
+        _officer = _u.scalar_one_or_none()
+        officer_branch_id = _officer.branch_id if _officer else None
     try:
         if entity_type == "collection":
             amount = float(payload.get("amount", 0))
@@ -81,6 +89,7 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
                 client_id=client_id,
                 task_id=payload.get("task_id"),
                 officer_id=officer_id,
+                branch_id=officer_branch_id,  # same branch stamp as the direct-POST path
                 amount=amount,
                 due_amount=float(payload.get("due_amount", 0)),
                 outstanding_after=outstanding_after,
@@ -115,6 +124,7 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
                 client_id=payload.get("client_id"),
                 task_id=payload.get("task_id"),
                 officer_id=officer_id,
+                branch_id=officer_branch_id,  # branch scoping (mig 008)
                 visit_purpose=payload.get("visit_purpose"),
                 gps_latitude=payload.get("gps_latitude"),
                 gps_longitude=payload.get("gps_longitude"),
@@ -188,9 +198,18 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
             await session.flush()
 
         elif entity_type == "task":
+            # Task branch = the ASSIGNEE officer's branch (where the work happens),
+            # which may differ from the syncing officer — so resolve it specifically.
+            assignee_id = payload.get("userId", payload.get("user_id"))
+            task_branch_id = None
+            if assignee_id is not None:
+                _a = await session.execute(select(User).where(User.id == assignee_id))
+                _assignee = _a.scalar_one_or_none()
+                task_branch_id = _assignee.branch_id if _assignee else None
             task = TaskAssignment(
                 client_id=payload.get("clientId", payload.get("client_id")),
-                user_id=payload.get("userId", payload.get("user_id")),
+                user_id=assignee_id,
+                branch_id=task_branch_id,  # assignee's branch (branch scoping, mig 008)
                 task_type=str(payload.get("taskType", payload.get("task_type", "collection"))),
                 task_date=payload.get("taskDate", payload.get("task_date")),
                 status=str(payload.get("status", "pending")),

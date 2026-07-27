@@ -15,6 +15,11 @@ class Collection(Base):
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("task_assignments.id"), nullable=True)
     officer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Branch this collection belongs to — stamped at write time from the recording
+    # officer's branch, NOT derived on read, so the money stays with the branch where
+    # it happened even if the officer later transfers. This is the column every
+    # manager/dashboard query filters on to keep Branch A from reading Branch B.
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     visit_id: Mapped[int | None] = mapped_column(ForeignKey("visit_checkins.id"), nullable=True)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     due_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

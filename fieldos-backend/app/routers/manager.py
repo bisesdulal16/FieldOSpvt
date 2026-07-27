@@ -14,7 +14,13 @@ from sqlalchemy import select, func, and_, or_, outerjoin, case
 from sqlalchemy.orm import aliased
 
 from app.database import get_db
-from app.deps.auth_deps import require_manager_or_admin, require_financial_access
+from app.deps.auth_deps import (
+    require_manager_or_admin,
+    require_financial_access,
+    get_current_user,
+    scope_to_branch,
+    can_see_all_branches,
+)
 from app.utils.nepal_time import today_nepal_str, days_ago_nepal_str
 from app.models.user import User, UserRole
 from app.models.client import Client
@@ -85,37 +91,50 @@ async def _get_client_by_id(
 # ---------------------------------------------------------------------------
 
 @router.get("/dashboard", response_model=ApiResponse)
-async def get_dashboard(db: AsyncSession = Depends(get_db)):
+async def get_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Returns all dashboard KPIs in a single call.
+
+    Branch scoping: Collection/VisitCheckin/TaskAssignment counts are scoped to the
+    manager's branch (admin sees all) via scope_to_branch. Client/PromiseToPay/
+    EndOfDayReport/SyncEvent aggregates are NOT yet branch-scoped — those tables have
+    no branch_id (see migration 008); scoping them is a tracked follow-up.
     """
     try:
         today = _today_str()
         yesterday = _yesterday_str()
 
-        # 1. Staff counts
-        staff_total = (await db.execute(
-            select(func.count()).select_from(User).where(User.is_active == True)  # noqa: E712
-        )).scalar() or 0
+        # 1. Staff counts — scoped by the user's branch directly (User has branch_id).
+        staff_q = select(func.count()).select_from(User).where(User.is_active == True)  # noqa: E712
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            staff_q = staff_q.where(User.branch_id == current_user.branch_id)
+        staff_total = (await db.execute(staff_q)).scalar() or 0
 
-        # Staff who started their day (have tasks or visits today)
-        started_users = (await db.execute(
+        # Staff who started their day (have tasks today) — scoped by task branch.
+        started_q = scope_to_branch(
             select(func.count(func.distinct(TaskAssignment.user_id)))
-            .where(TaskAssignment.task_date == today)
-        )).scalar() or 0
+            .where(TaskAssignment.task_date == today),
+            TaskAssignment, current_user,
+        )
+        started_users = (await db.execute(started_q)).scalar() or 0
 
         staff_started_pct = round(started_users / staff_total * 100, 1) if staff_total else 0.0
 
         # 2. Visit counts
-        visits_today = (await db.execute(
+        visits_today = (await db.execute(scope_to_branch(
             select(func.count()).select_from(VisitCheckin)
-            .where(VisitCheckin.checked_in_at.like(f"{today}%"))
-        )).scalar() or 0
+            .where(VisitCheckin.checked_in_at.like(f"{today}%")),
+            VisitCheckin, current_user,
+        ))).scalar() or 0
 
-        visits_yesterday = (await db.execute(
+        visits_yesterday = (await db.execute(scope_to_branch(
             select(func.count()).select_from(VisitCheckin)
-            .where(VisitCheckin.checked_in_at.like(f"{yesterday}%"))
-        )).scalar() or 0
+            .where(VisitCheckin.checked_in_at.like(f"{yesterday}%")),
+            VisitCheckin, current_user,
+        ))).scalar() or 0
 
         visits_vs_yesterday = (
             round((visits_today - visits_yesterday) / visits_yesterday * 100, 1)
@@ -123,15 +142,17 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         )
 
         # 3. Collection totals
-        collections_today_npr = (await db.execute(
+        collections_today_npr = (await db.execute(scope_to_branch(
             select(func.coalesce(func.sum(Collection.amount), 0))
-            .where(Collection.collected_at.like(f"{today}%"))
-        )).scalar() or 0
+            .where(Collection.collected_at.like(f"{today}%")),
+            Collection, current_user,
+        ))).scalar() or 0
 
-        collections_yesterday_npr = (await db.execute(
+        collections_yesterday_npr = (await db.execute(scope_to_branch(
             select(func.coalesce(func.sum(Collection.amount), 0))
-            .where(Collection.collected_at.like(f"{yesterday}%"))
-        )).scalar() or 0
+            .where(Collection.collected_at.like(f"{yesterday}%")),
+            Collection, current_user,
+        ))).scalar() or 0
 
         collections_vs_yesterday = (
             round((collections_today_npr - collections_yesterday_npr) / collections_yesterday_npr * 100, 1)
@@ -139,15 +160,17 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
         )
 
         # 4. Pending verification (high-value unverified collections)
-        pending_verification = (await db.execute(
+        pending_verification = (await db.execute(scope_to_branch(
             select(func.count()).select_from(Collection)
             .where(and_(
                 Collection.is_high_value == True,  # noqa: E712
                 Collection.cbs_verified == False,  # noqa: E712
-            ))
-        )).scalar() or 0
+            )),
+            Collection, current_user,
+        ))).scalar() or 0
 
         # 5. PAR followup due (clients with overdue > 0)
+        # NOTE: Client has no branch_id yet — NOT branch-scoped (tracked follow-up).
         par_followup_due = (await db.execute(
             select(func.count()).select_from(Client)
             .where(and_(
@@ -173,13 +196,14 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
 
         # 8. Exceptions count — derived from multiple sources
         #    a) High-value unverified collections
-        high_val_unverified = (await db.execute(
+        high_val_unverified = (await db.execute(scope_to_branch(
             select(func.count()).select_from(Collection)
             .where(and_(
                 Collection.is_high_value == True,  # noqa: E712
                 Collection.cbs_verified == False,  # noqa: E712
-            ))
-        )).scalar() or 0
+            )),
+            Collection, current_user,
+        ))).scalar() or 0
 
         #    b) EOD reports with cash-related exceptions
         eod_with_exceptions = (await db.execute(
@@ -248,15 +272,23 @@ async def get_dashboard(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/staff", response_model=ApiResponse)
-async def get_staff(db: AsyncSession = Depends(get_db)):
-    """Returns all staff members with today's activity summary."""
+async def get_staff(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns all staff members with today's activity summary.
+
+    Branch-scoped: a branch manager sees only their own branch's staff; scoping the
+    staff list scopes everything downstream (visits/collections key off staff_ids).
+    """
     try:
         today = _today_str()
 
-        # 1. Get all active staff
-        result = await db.execute(
-            select(User).where(User.is_active == True).order_by(User.staff_id)  # noqa: E712
-        )
+        # 1. Get all active staff — scoped to the manager's branch (admin sees all).
+        staff_query = select(User).where(User.is_active == True)  # noqa: E712
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            staff_query = staff_query.where(User.branch_id == current_user.branch_id)
+        result = await db.execute(staff_query.order_by(User.staff_id))
         staff_list = result.scalars().all()
         staff_ids = [s.id for s in staff_list]
 
@@ -354,8 +386,9 @@ async def get_staff(db: AsyncSession = Depends(get_db)):
 async def get_visits(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Returns visit check-in records for today."""
+    """Returns visit check-in records for today (branch-scoped)."""
     try:
         today = _today_str()
 
@@ -378,6 +411,7 @@ async def get_visits(
             .order_by(VisitCheckin.checked_in_at.desc())
             .limit(limit)
         )
+        stmt = scope_to_branch(stmt, VisitCheckin, current_user)
         result = await db.execute(stmt)
         rows = result.all()
 
@@ -412,12 +446,18 @@ async def get_visits(
 async def get_collections(
     recent_limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Returns collection records for today with daily/weekly summary."""
+    """Returns collection records for today with daily/weekly summary (branch-scoped).
+
+    Collection sums/lists are branch-scoped. weekly_target_npr derives from Client
+    (no branch_id yet) so it is NOT scoped — a tracked follow-up.
+    """
     try:
         today = _today_str()
 
-        # Weekly target: sum of all active clients' due_amounts, or a minimum
+        # Weekly target: sum of all active clients' due_amounts, or a minimum.
+        # NOTE: Client has no branch_id yet — not branch-scoped (tracked follow-up).
         weekly_target_npr = (await db.execute(
             select(func.coalesce(func.sum(Client.due_amount), 0))
             .where(Client.status == "active")
@@ -427,17 +467,19 @@ async def get_collections(
         daily_target_npr = round(weekly_target_npr / 7)
 
         # Today's collections
-        today_npr = (await db.execute(
+        today_npr = (await db.execute(scope_to_branch(
             select(func.coalesce(func.sum(Collection.amount), 0))
-            .where(Collection.collected_at.like(f"{today}%"))
-        )).scalar() or 0
+            .where(Collection.collected_at.like(f"{today}%")),
+            Collection, current_user,
+        ))).scalar() or 0
 
         # Week's collections (last 7 days)
         week_start = days_ago_nepal_str(6)
-        week_npr = (await db.execute(
+        week_npr = (await db.execute(scope_to_branch(
             select(func.coalesce(func.sum(Collection.amount), 0))
-            .where(Collection.collected_at >= week_start)
-        )).scalar() or 0
+            .where(Collection.collected_at >= week_start),
+            Collection, current_user,
+        ))).scalar() or 0
 
         week_achievement_pct = (
             round(week_npr / weekly_target_npr * 100, 1)
@@ -448,10 +490,11 @@ async def get_collections(
         daily_breakdown = []
         for i in range(6, -1, -1):
             d = days_ago_nepal_str(i)
-            day_total = (await db.execute(
+            day_total = (await db.execute(scope_to_branch(
                 select(func.coalesce(func.sum(Collection.amount), 0))
-                .where(Collection.collected_at.like(f"{d}%"))
-            )).scalar() or 0
+                .where(Collection.collected_at.like(f"{d}%")),
+                Collection, current_user,
+            ))).scalar() or 0
             daily_breakdown.append({
                 "date": d,
                 "target_npr": daily_target_npr,
@@ -479,6 +522,7 @@ async def get_collections(
             .order_by(Collection.collected_at.desc())
             .limit(recent_limit)
         )
+        stmt = scope_to_branch(stmt, Collection, current_user)
         result = await db.execute(stmt)
         rows = result.all()
 
@@ -526,7 +570,12 @@ async def get_par_followup(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns PAR/overdue clients who need follow-up."""
+    """Returns PAR/overdue clients who need follow-up.
+
+    NOT branch-scoped yet: driven entirely by Client (no branch_id — migration 008
+    only covers collections/visits/tasks). Client branch scoping is a tracked
+    follow-up; a branch manager currently sees org-wide PAR here.
+    """
     try:
         # Get overdue clients
         result = await db.execute(
@@ -583,7 +632,11 @@ async def get_par_followup(
 
 @router.get("/ptp-today", response_model=ApiResponse)
 async def get_ptp_today(db: AsyncSession = Depends(get_db)):
-    """Returns promise-to-pay records due today."""
+    """Returns promise-to-pay records due today.
+
+    NOT branch-scoped yet: driven by PromiseToPay (no branch_id — migration 008
+    covers collections/visits/tasks only). Tracked follow-up.
+    """
     try:
         today = _today_str()
 
@@ -633,20 +686,23 @@ async def get_ptp_today(db: AsyncSession = Depends(get_db)):
 async def get_exceptions(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Returns a synthesised exceptions queue derived from:
-    - High-value unverified collections
-    - EOD report exceptions (cash mismatch, etc.)
-    - NPA-risk clients (overdue >= 30 days)
-    - Failed sync events
+    - High-value unverified collections  (branch-scoped)
+    - EOD report exceptions (cash mismatch, etc.)  (NOT scoped — EOD has no branch_id)
+    - NPA-risk clients (overdue >= 30 days)  (NOT scoped — Client has no branch_id)
+    - Failed sync events  (NOT scoped — SyncEvent has no branch_id)
+    Client/EOD/SyncEvent scoping is a tracked follow-up (migration 008 only covers
+    collections/visits/tasks).
     """
     try:
         exceptions: list[dict[str, Any]] = []
         exc_id = 0
 
-        # --- 1. High-value unverified collections ---
-        hv_result = await db.execute(
+        # --- 1. High-value unverified collections (branch-scoped) ---
+        hv_stmt = (
             select(Collection, Client.name.label("client_name"), User.name.label("officer_name"))
             .outerjoin(Client, Collection.client_id == Client.id)
             .outerjoin(TaskAssignment, Collection.task_id == TaskAssignment.id)
@@ -657,6 +713,7 @@ async def get_exceptions(
             ))
             .order_by(Collection.created_at.desc())
         )
+        hv_result = await db.execute(scope_to_branch(hv_stmt, Collection, current_user))
         for coll, client_name, officer_name in hv_result.all():
             exc_id += 1
             exceptions.append({
@@ -768,7 +825,12 @@ async def get_exceptions(
 
 @router.get("/eod-reviews", response_model=ApiResponse)
 async def get_eod_reviews(db: AsyncSession = Depends(get_db)):
-    """Returns EOD submission status summary and report list."""
+    """Returns EOD submission status summary and report list.
+
+    NOT branch-scoped yet: driven by EndOfDayReport (no branch_id — migration 008
+    covers collections/visits/tasks). Tracked follow-up; a branch manager currently
+    sees org-wide EOD submissions here.
+    """
     try:
         today = _today_str()
 
@@ -1092,23 +1154,34 @@ async def sync_events(
 # ---------------------------------------------------------------------------
 
 @router.get("/pilot-metrics", response_model=ApiResponse)
-async def pilot_metrics(db: AsyncSession = Depends(get_db)):
+async def pilot_metrics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """The numbers that decide whether the pilot succeeded and that become the sales deck:
-    adoption, throughput, anti-fraud proof, and reliability."""
+    adoption, throughput, anti-fraud proof, and reliability.
+
+    Branch-scoped: officers/collections/visits are scoped to the manager's branch
+    (admin sees institution-wide). SmsNotification/SyncEvent counts are not yet
+    branch-scoped (no branch_id) — tracked follow-up.
+    """
     try:
         today = _today_str()
 
-        officers = (await db.execute(
-            select(User).where(User.role == UserRole.FIELD_OFFICER.value)
-        )).scalars().all()
+        officers_q = select(User).where(User.role == UserRole.FIELD_OFFICER.value)
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            officers_q = officers_q.where(User.branch_id == current_user.branch_id)
+        officers = (await db.execute(officers_q)).scalars().all()
         officer_ids = {o.id for o in officers}
 
-        cols_today = (await db.execute(
-            select(Collection).where(Collection.collected_at.like(f"{today}%"))
-        )).scalars().all()
-        visits_today = (await db.execute(
-            select(VisitCheckin).where(VisitCheckin.checked_in_at.like(f"{today}%"))
-        )).scalars().all()
+        cols_today = (await db.execute(scope_to_branch(
+            select(Collection).where(Collection.collected_at.like(f"{today}%")),
+            Collection, current_user,
+        ))).scalars().all()
+        visits_today = (await db.execute(scope_to_branch(
+            select(VisitCheckin).where(VisitCheckin.checked_in_at.like(f"{today}%")),
+            VisitCheckin, current_user,
+        ))).scalars().all()
         day_starts_today = (await db.execute(
             select(DayStartRecord).where(DayStartRecord.day_date == today)
         )).scalars().all()
@@ -1128,9 +1201,10 @@ async def pilot_metrics(db: AsyncSession = Depends(get_db)):
             for c in cols_today
         )
 
-        collections_alltime = (await db.execute(
-            select(func.coalesce(func.sum(Collection.amount), 0))
-        )).scalar() or 0
+        collections_alltime = (await db.execute(scope_to_branch(
+            select(func.coalesce(func.sum(Collection.amount), 0)),
+            Collection, current_user,
+        ))).scalar() or 0
         pending_sync = (await db.execute(
             select(func.count()).select_from(SyncEvent).where(SyncEvent.status == "pending")
         )).scalar() or 0
@@ -1170,13 +1244,21 @@ async def officer_activity(
     officer_id: int = Query(...),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """A single officer's complete, chronological activity — day-starts, visits (with location),
     collections (amount + location), and audited actions. This is the "select a person, see
-    everywhere they were and everything they did" view."""
+    everywhere they were and everything they did" view.
+
+    Branch-scoped by GUARD: a branch manager may only inspect officers in their own
+    branch (admin may inspect anyone). This blocks reading another branch's officer by id.
+    """
     try:
         officer = (await db.execute(select(User).where(User.id == officer_id))).scalar_one_or_none()
         if not officer:
+            raise HTTPException(status_code=404, detail="Officer not found")
+        # Cross-branch guard: a scoped manager cannot pull an officer outside their branch.
+        if not can_see_all_branches(current_user) and officer.branch_id != current_user.branch_id:
             raise HTTPException(status_code=404, detail="Officer not found")
         clients = {c.id: c for c in (await db.execute(select(Client))).scalars().all()}
         cname = lambda cid: clients[cid].name if cid in clients else (f"#{cid}" if cid else None)
@@ -1241,15 +1323,23 @@ async def officer_activity(
 # ---------------------------------------------------------------------------
 
 @router.get("/cash-reconciliation", response_model=ApiResponse)
-async def cash_reconciliation(db: AsyncSession = Depends(get_db)):
+async def cash_reconciliation(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Per officer today: total collected, cash (physical cash the officer should be holding),
     and digital. The manager counts the cash in hand and compares it to 'cash' here — any gap is
-    leakage or a recording error. All figures are the server's truth from recorded collections."""
+    leakage or a recording error. All figures are the server's truth from recorded collections.
+
+    Branch-scoped: the officer list is limited to the manager's branch (admin sees all),
+    so per-officer cash figures never cross the branch boundary.
+    """
     try:
         today = _today_str()
-        officers = (await db.execute(
-            select(User).where(User.role == UserRole.FIELD_OFFICER.value)
-        )).scalars().all()
+        officers_q = select(User).where(User.role == UserRole.FIELD_OFFICER.value)
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            officers_q = officers_q.where(User.branch_id == current_user.branch_id)
+        officers = (await db.execute(officers_q)).scalars().all()
         data = []
         for o in officers:
             cols = (await db.execute(
@@ -1278,11 +1368,16 @@ async def cash_reconciliation(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/anomalies", response_model=ApiResponse)
-async def anomalies(db: AsyncSession = Depends(get_db)):
+async def anomalies(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Automatic flags on today's activity, so the manager doesn't have to eyeball everything:
       - collection_without_visit: a payment recorded with no visit check-in for that client/officer
       - collection_without_gps:   a collection saved with location off (possible mock/masking)
       - eod_mismatch:             the officer's End-of-Day total ≠ the actual sum of collections
+
+    Branch-scoped: today's collections/visits are limited to the manager's branch (admin all).
     """
     try:
         today = _today_str()
@@ -1292,12 +1387,14 @@ async def anomalies(db: AsyncSession = Depends(get_db)):
         def oname(oid): return officers[oid].name if oid in officers else f"#{oid}"
         def cname(cid): return clients[cid].name if cid in clients else f"#{cid}"
 
-        cols = (await db.execute(
-            select(Collection).where(Collection.collected_at.like(f"{today}%"))
-        )).scalars().all()
-        visits = (await db.execute(
-            select(VisitCheckin).where(VisitCheckin.checked_in_at.like(f"{today}%"))
-        )).scalars().all()
+        cols = (await db.execute(scope_to_branch(
+            select(Collection).where(Collection.collected_at.like(f"{today}%")),
+            Collection, current_user,
+        ))).scalars().all()
+        visits = (await db.execute(scope_to_branch(
+            select(VisitCheckin).where(VisitCheckin.checked_in_at.like(f"{today}%")),
+            VisitCheckin, current_user,
+        ))).scalars().all()
         visited = {(v.officer_id, v.client_id) for v in visits}
 
         flags = []
@@ -1347,14 +1444,21 @@ async def anomalies(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/staff-locations", response_model=ApiResponse)
-async def get_staff_locations(db: AsyncSession = Depends(get_db)):
+async def get_staff_locations(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Each field officer's most recent GPS position plus a short trail, built from the GPS
     already captured at visit check-ins and collections. Event-based (only official actions),
-    never continuous tracking — matches what field officers will accept."""
+    never continuous tracking — matches what field officers will accept.
+
+    Branch-scoped: officer list limited to the manager's branch (admin sees all).
+    """
     try:
-        officers = (await db.execute(
-            select(User).where(User.role == UserRole.FIELD_OFFICER.value)
-        )).scalars().all()
+        officers_q = select(User).where(User.role == UserRole.FIELD_OFFICER.value)
+        if not can_see_all_branches(current_user) and current_user.branch_id is not None:
+            officers_q = officers_q.where(User.branch_id == current_user.branch_id)
+        officers = (await db.execute(officers_q)).scalars().all()
 
         data = []
         for o in officers:
@@ -1397,9 +1501,14 @@ async def get_staff_locations(db: AsyncSession = Depends(get_db)):
 async def get_day_starts(
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Recent day-start records with officer name, network-verification, and selfie — the
-    manager's proof of who actually started their day at the branch."""
+    manager's proof of who actually started their day at the branch.
+
+    Branch-scoped: DayStartRecord already carries branch_id, so a branch manager sees
+    only their branch's attendance (admin sees all).
+    """
     try:
         stmt = (
             select(DayStartRecord, User.name.label("officer_name"), User.staff_id.label("staff_id"))
@@ -1407,6 +1516,7 @@ async def get_day_starts(
             .order_by(DayStartRecord.created_at.desc())
             .limit(limit)
         )
+        stmt = scope_to_branch(stmt, DayStartRecord, current_user)
         rows = (await db.execute(stmt)).all()
         data = [{
             "id": r.id,
@@ -1518,6 +1628,7 @@ async def create_staff(
 async def create_task(
     body: dict,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Branch manager assigns a task to an officer.
@@ -1557,9 +1668,20 @@ async def create_task(
                 resolved_user = user_result.scalar_one_or_none()
                 resolved_user_id = resolved_user.id if resolved_user else None
 
+        # Task branch = the ASSIGNEE officer's branch (where the work happens), so an
+        # area manager assigning across branches tags the row correctly. Falls back to
+        # the assigning manager's branch if the task is unassigned. (Branch scoping, mig 008.)
+        task_branch_id = current_user.branch_id
+        if resolved_user_id is not None:
+            assignee_result = await db.execute(select(User).where(User.id == resolved_user_id))
+            assignee = assignee_result.scalar_one_or_none()
+            if assignee and assignee.branch_id is not None:
+                task_branch_id = assignee.branch_id
+
         task = TaskAssignment(
             client_id=int(client_id),
             user_id=resolved_user_id,
+            branch_id=task_branch_id,
             task_type=task_type,
             task_date=str(task_date),
             status="pending",
@@ -1603,8 +1725,9 @@ async def create_task(
 async def get_today_assigned_tasks(
     officer_id: int | None = Query(None, description="Filter by officer ID"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Returns tasks assigned for today, optionally filtered by officer."""
+    """Returns tasks assigned for today, optionally filtered by officer (branch-scoped)."""
     try:
         today = _today_str()
         query = select(TaskAssignment).where(
@@ -1615,6 +1738,7 @@ async def get_today_assigned_tasks(
         )
         if officer_id:
             query = query.where(TaskAssignment.user_id == int(officer_id))
+        query = scope_to_branch(query, TaskAssignment, current_user)
 
         query = query.order_by(
             case((TaskAssignment.priority == "high", 0),
