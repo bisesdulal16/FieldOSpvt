@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 
 from app.database import get_db
-from app.deps.auth_deps import require_manager_or_admin
+from app.deps.auth_deps import get_current_user, require_manager_or_admin
 from app.models.user import User
 from app.models.client import Client
 from app.models.collection import Collection
