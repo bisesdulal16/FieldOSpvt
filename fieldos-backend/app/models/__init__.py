@@ -29,6 +29,7 @@ from app.models.client_communication import (
     ClientCommunicationEvent,
     ClientCommunicationAttempt,
     ClientCommunicationOutbox,
+    ClientCommunicationWorkerHeartbeat,
 )
 
 __all__ = [
@@ -62,5 +63,6 @@ __all__ = [
     "ClientCommunicationEvent",
     "ClientCommunicationAttempt",
     "ClientCommunicationOutbox",
+    "ClientCommunicationWorkerHeartbeat",
     "Announcement",
 ]

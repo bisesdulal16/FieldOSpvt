@@ -98,8 +98,31 @@ class ClientCommunicationOutbox(Base):
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     locked_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recovery_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_recovered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_recovered_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ClientCommunicationWorkerHeartbeat(Base):
+    """Last known status for a communication outbox worker process."""
+
+    __tablename__ = "client_communication_worker_heartbeats"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    worker_id: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    process_alive: Mapped[bool] = mapped_column(default=True, nullable=False)
+    worker_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    last_successful_poll: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_successful_dispatch: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

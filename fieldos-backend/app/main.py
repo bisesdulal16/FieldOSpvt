@@ -49,6 +49,7 @@ from app.routers import (
     pilot,
     announcements,
     feedback,
+    communication_outbox,
 )
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,7 @@ app.include_router(voice_ai.router, prefix=settings.API_V1_PREFIX, tags=["Voice 
 app.include_router(security.router, prefix=settings.API_V1_PREFIX, tags=["Security & Compliance"])
 app.include_router(pilot.router, prefix=settings.API_V1_PREFIX, tags=["Pilot Management"])
 app.include_router(feedback.router, prefix=settings.API_V1_PREFIX, tags=["Feedback"])
+app.include_router(communication_outbox.router, prefix=settings.API_V1_PREFIX, tags=["Client Communication Outbox"])
 
 # Announcements: two routers — manager (POST) + mobile (GET)
 app.include_router(announcements.manager_router, prefix=settings.API_V1_PREFIX, tags=["Announcements"])

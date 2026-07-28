@@ -74,6 +74,16 @@ class Settings:
     VERIFICATION_DEFAULT_PRIORITY: str = os.getenv("VERIFICATION_DEFAULT_PRIORITY", "normal")
     CALL_PROVIDER: str = os.getenv("CALL_PROVIDER", "log").lower()
 
+    # ── Communication outbox worker (Phase 2, safe-off by default) ─────────
+    COMMUNICATION_WORKER_ENABLED: bool = os.getenv("COMMUNICATION_WORKER_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    OUTBOX_POLL_INTERVAL_SECONDS: float = float(os.getenv("OUTBOX_POLL_INTERVAL_SECONDS", "2"))
+    OUTBOX_BATCH_SIZE: int = int(os.getenv("OUTBOX_BATCH_SIZE", "50"))
+    OUTBOX_LOCK_TIMEOUT_SECONDS: int = int(os.getenv("OUTBOX_LOCK_TIMEOUT_SECONDS", "300"))
+    OUTBOX_MAX_ATTEMPTS: int = int(os.getenv("OUTBOX_MAX_ATTEMPTS", "5"))
+    OUTBOX_BASE_RETRY_SECONDS: int = int(os.getenv("OUTBOX_BASE_RETRY_SECONDS", "30"))
+    OUTBOX_MAX_RETRY_SECONDS: int = int(os.getenv("OUTBOX_MAX_RETRY_SECONDS", "3600"))
+    OUTBOX_LOG_PROVIDER_FAIL_PERCENT: float = float(os.getenv("OUTBOX_LOG_PROVIDER_FAIL_PERCENT", "0"))
+
     # ── SMS gateway (client receipt notifications) ────────────────────────
     # SMS_PROVIDER=log          → dev/demo: records the message, sends nothing
     # SMS_PROVIDER=sparrow_http → Nepal production via Sparrow HTTP
