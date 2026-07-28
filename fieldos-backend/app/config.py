@@ -91,7 +91,8 @@ class Settings:
     SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "log").lower()
     SMS_API_TOKEN: str = os.getenv("SMS_API_TOKEN", "")
     SMS_SENDER: str = os.getenv("SMS_SENDER", "FieldOS")  # Sparrow "from" identity
-    SMS_SPARROW_URL: str = os.getenv("SMS_SPARROW_URL", "http://api.sparrowsms.com/v2/sms/")
+    SMS_SPARROW_URL: str = os.getenv("SMS_SPARROW_URL", "https://api.sparrowsms.com/v2/sms/")
+    SMS_REQUEST_TIMEOUT_SECONDS: float = float(os.getenv("SMS_REQUEST_TIMEOUT_SECONDS", "10"))
     SMS_CALLBACK_SECRET: str = os.getenv("SMS_CALLBACK_SECRET", "")
     JASMIN_HTTP_URL: str = os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401/send")
 

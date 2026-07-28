@@ -23,6 +23,7 @@ from app.models.client_communication import (
     ClientCommunicationOutbox,
     ClientCommunicationWorkerHeartbeat,
 )
+from app.models.sms_notification import SmsNotification
 from app.services.audit_helper import write_audit
 from app.services.communication_providers import DispatchResult, parse_payload, provider_for
 
@@ -109,6 +110,58 @@ async def write_system_audit(session: AsyncSession, action_type: str, *, entity_
     safe_meta.pop("message", None)
     safe_meta.pop("payload", None)
     return await write_audit(session, None, action_type, entity_type=entity_type, entity_id=entity_id, meta=safe_meta)
+
+
+def _attempt_metadata(attempt: ClientCommunicationAttempt) -> dict:
+    try:
+        parsed = json.loads(attempt.metadata_json or "{}")
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+async def upsert_legacy_sms_notification(
+    session: AsyncSession,
+    *,
+    event: ClientCommunicationEvent,
+    attempt: ClientCommunicationAttempt,
+    status: str,
+    error: str | None = None,
+) -> None:
+    """Maintain legacy receipt compatibility without creating duplicate receipt rows."""
+    receipt_id = event.source_reference
+    if not receipt_id:
+        return
+    existing = (
+        await session.execute(
+            select(SmsNotification)
+            .where(SmsNotification.collection_receipt_id == receipt_id)
+            .where(SmsNotification.kind.in_(["collection_verification", "collection_receipt"]))
+            .order_by(SmsNotification.id.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    metadata = _attempt_metadata(attempt)
+    message = str(metadata.get("message") or "")
+    if existing is None:
+        session.add(
+            SmsNotification(
+                client_id=event.client_id,
+                collection_receipt_id=receipt_id,
+                phone_number=attempt.recipient,
+                kind="collection_verification",
+                message=message,
+                provider=attempt.provider or settings.SMS_PROVIDER,
+                status=status,
+                error=error,
+            )
+        )
+        return
+    existing.provider = attempt.provider or settings.SMS_PROVIDER
+    existing.status = status
+    existing.error = error
+    if message and not existing.message:
+        existing.message = message
 
 
 async def upsert_worker_heartbeat(
@@ -406,6 +459,7 @@ async def persist_dispatch_result(
         attempt.provider_reference = result.provider_reference
         attempt.submitted_at = now
         event.status = "provider_accepted"
+        await upsert_legacy_sms_notification(session, event=event, attempt=attempt, status="submitted", error=None)
         _METRICS["outbox_dispatch_success_total"] += 1
         await upsert_worker_heartbeat(session, worker_id=worker_id, worker_enabled=settings.COMMUNICATION_WORKER_ENABLED, successful_dispatch=True)
         await write_system_audit(
@@ -430,6 +484,7 @@ async def persist_dispatch_result(
         attempt.error_code = result.error_code
         attempt.error_message = result.safe_error_message
         event.status = "failed"
+        await upsert_legacy_sms_notification(session, event=event, attempt=attempt, status="failed", error=result.safe_error_message)
         await write_system_audit(
             session,
             "communication_dispatch_dead_lettered",
