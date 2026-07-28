@@ -45,7 +45,7 @@ async def record_and_send_receipt(
         status, error = "no_phone", None
     else:
         ok, error = await send_sms(phone_number, message)
-        status = "sent" if ok else "failed"
+        status = "submitted" if ok else "failed"
 
     db.add(SmsNotification(
         client_id=client_id,

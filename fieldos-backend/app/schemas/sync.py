@@ -17,6 +17,8 @@ class SyncEventResult(BaseModel):
     entity_id: str
     status: str
     error: str | None = None
+    id: int | None = None
+    duplicate: bool | None = None
 
 
 class SyncStatusResponse(BaseModel):

@@ -57,13 +57,33 @@ class Settings:
     # it falls back to the selfie photo-proof, same as the IP gate's opt-in shape.
     DAY_START_FACE_GATE: bool = os.getenv("DAY_START_FACE_GATE", "false").strip().lower() in ("1", "true", "yes", "on")
 
+    # ── Client Protection / communication ledger ─────────────────────────
+    # Disabled-by-default for dispatch. The ledger/outbox can still be created
+    # transactionally so collection verification state is durable before any
+    # worker/provider is available.
+    CLIENT_PROTECTION_ENABLED: bool = os.getenv("CLIENT_PROTECTION_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    VERIFICATION_SMS_ENABLED: bool = os.getenv("VERIFICATION_SMS_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    VERIFICATION_IVR_ENABLED: bool = os.getenv("VERIFICATION_IVR_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    VERIFICATION_AI_CALL_ENABLED: bool = os.getenv("VERIFICATION_AI_CALL_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    VERIFICATION_RANDOM_SAMPLE_PERCENT: float = float(os.getenv("VERIFICATION_RANDOM_SAMPLE_PERCENT", "0"))
+    VERIFICATION_HIGH_VALUE_THRESHOLD: float = float(os.getenv("VERIFICATION_HIGH_VALUE_THRESHOLD", "0"))
+    VERIFICATION_MAX_SMS_ATTEMPTS: int = int(os.getenv("VERIFICATION_MAX_SMS_ATTEMPTS", "3"))
+    VERIFICATION_MAX_CALL_ATTEMPTS: int = int(os.getenv("VERIFICATION_MAX_CALL_ATTEMPTS", "3"))
+    VERIFICATION_ESCALATION_HOURS: int = int(os.getenv("VERIFICATION_ESCALATION_HOURS", "24"))
+    VERIFICATION_DEFAULT_LANGUAGE: str = os.getenv("VERIFICATION_DEFAULT_LANGUAGE", "en")
+    VERIFICATION_DEFAULT_PRIORITY: str = os.getenv("VERIFICATION_DEFAULT_PRIORITY", "normal")
+    CALL_PROVIDER: str = os.getenv("CALL_PROVIDER", "log").lower()
+
     # ── SMS gateway (client receipt notifications) ────────────────────────
-    # SMS_PROVIDER=log     → dev/demo: records the message, sends nothing (no gateway needed)
-    # SMS_PROVIDER=sparrow → Nepal production via Sparrow SMS (needs token + credits)
+    # SMS_PROVIDER=log          → dev/demo: records the message, sends nothing
+    # SMS_PROVIDER=sparrow_http → Nepal production via Sparrow HTTP
+    # SMS_PROVIDER=jasmin_http  → Jasmin HTTP API/SMPP bridge
     SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "log").lower()
     SMS_API_TOKEN: str = os.getenv("SMS_API_TOKEN", "")
     SMS_SENDER: str = os.getenv("SMS_SENDER", "FieldOS")  # Sparrow "from" identity
     SMS_SPARROW_URL: str = os.getenv("SMS_SPARROW_URL", "http://api.sparrowsms.com/v2/sms/")
+    SMS_CALLBACK_SECRET: str = os.getenv("SMS_CALLBACK_SECRET", "")
+    JASMIN_HTTP_URL: str = os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401/send")
 
     # ── Error monitoring (Sentry) ─────────────────────────────────────────
     # Set SENTRY_DSN in production to capture exceptions. Unset = disabled (no-op).
