@@ -23,5 +23,5 @@ class SmsNotification(Base):
     kind: Mapped[str] = mapped_column(String(30), default="collection_receipt", nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     provider: Mapped[str] = mapped_column(String(20), default="log", nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="queued", nullable=False)  # queued|sent|failed|no_phone
+    status: Mapped[str] = mapped_column(String(20), default="queued", nullable=False)  # pending|queued|submitted|failed|no_phone
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

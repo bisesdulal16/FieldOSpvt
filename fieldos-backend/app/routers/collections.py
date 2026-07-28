@@ -12,7 +12,7 @@ from app.schemas.collection import CollectionCreate, CollectionResponse
 from app.schemas.common import ApiResponse
 from app.services import auth_service
 from app.services.audit_helper import write_audit
-from app.services.sms_service import record_and_send_receipt
+from app.services.client_communication_service import ensure_collection_verification_event
 from app.deps.auth_deps import get_current_user, require_financial_access, can_see_all_branches
 from app.utils.nepal_time import to_nepal_iso
 
@@ -134,16 +134,17 @@ async def create_collection(
                   "payment_method": request.payment_method or "cash"},
         )
 
-        client_phone = client.phone_number if client else None
-        await db.commit()
-
-        # Anti-under-reporting control: the SERVER (never the officer's phone) texts the client
-        # the exact recorded amount, so a collection can't be quietly under-reported. Best-effort
-        # + logged in sms_notifications; a gateway outage never fails the collection.
-        await record_and_send_receipt(
-            db, client_id=request.client_id, phone_number=client_phone,
-            amount=amount, receipt_id=receipt_id,
+        # Create the official client communication / verification ledger row in
+        # the SAME transaction as the collection. Dispatch happens later via the
+        # durable outbox and must never block the financial commit.
+        await ensure_collection_verification_event(
+            db,
+            collection=collection,
+            client=client,
+            actor=current_user,
         )
+
+        await db.commit()
 
         return ApiResponse(
             success=True,

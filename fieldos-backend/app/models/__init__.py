@@ -25,6 +25,11 @@ from app.models.cbs import (
 from app.models.announcement import Announcement
 from app.models.sms_notification import SmsNotification
 from app.models.day_start import DayStartRecord
+from app.models.client_communication import (
+    ClientCommunicationEvent,
+    ClientCommunicationAttempt,
+    ClientCommunicationOutbox,
+)
 
 __all__ = [
     "Base",
@@ -54,5 +59,8 @@ __all__ = [
     "CBSPostingLog",
     "SmsNotification",
     "DayStartRecord",
+    "ClientCommunicationEvent",
+    "ClientCommunicationAttempt",
+    "ClientCommunicationOutbox",
     "Announcement",
 ]

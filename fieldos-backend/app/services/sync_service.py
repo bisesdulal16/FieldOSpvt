@@ -15,7 +15,7 @@ from app.models.user import User
 from app.models.end_of_day import EndOfDayReport
 from app.models.center_meeting import CenterMeeting
 from app.models.task import TaskAssignment
-from app.services.sms_service import record_and_send_receipt
+from app.services.client_communication_service import ensure_collection_verification_event
 from app.utils.nepal_time import to_nepal_iso
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
     # tasks get the same branch stamp as the direct-POST path (branch scoping, mig 008).
     # Derived from the trusted officer, never from the offline payload.
     officer_branch_id = None
+    _officer = None
     if officer_id is not None:
         _u = await session.execute(select(User).where(User.id == officer_id))
         _officer = _u.scalar_one_or_none()
@@ -67,6 +68,25 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
         if entity_type == "collection":
             amount = float(payload.get("amount", 0))
             client_id = payload.get("client_id")
+            receipt_id = payload.get("receipt_id", entity_id)
+            existing_collection_result = await session.execute(
+                select(Collection).where(Collection.receipt_id == receipt_id)
+            )
+            existing_collection = existing_collection_result.scalar_one_or_none()
+            if existing_collection:
+                existing_client = None
+                if existing_collection.client_id:
+                    existing_client_result = await session.execute(
+                        select(Client).where(Client.id == existing_collection.client_id)
+                    )
+                    existing_client = existing_client_result.scalar_one_or_none()
+                await ensure_collection_verification_event(
+                    session,
+                    collection=existing_collection,
+                    client=existing_client,
+                    actor=_officer if officer_id is not None else None,
+                )
+                return {"status": "completed", "id": existing_collection.id, "duplicate": True}
             # Single source of truth: the client's real outstanding. The payload's
             # outstanding_after is ignored. Offline collections are NOT rejected (we
             # must not silently drop a real field collection), but the amount is capped
@@ -85,7 +105,7 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
                 amount = current_outstanding
             outstanding_after = max(0.0, current_outstanding - amount)
             collection = Collection(
-                receipt_id=payload.get("receipt_id", entity_id),
+                receipt_id=receipt_id,
                 client_id=client_id,
                 task_id=payload.get("task_id"),
                 officer_id=officer_id,
@@ -105,19 +125,21 @@ async def _handle_create(session: AsyncSession, entity_type: str, entity_id: str
             session.add(collection)
             await session.flush()
 
-            # Update client's due_amount and outstanding_balance after collection
-            client_phone = None
+            # Update client's due_amount and outstanding_balance after collection.
             if client:
                 client.outstanding_balance = outstanding_after
                 client.due_amount = max(0.0, float(client.due_amount) - amount)
-                client_phone = client.phone_number
 
-            # Anti-under-reporting: fire the client receipt on the offline path too, so an
-            # officer can't dodge it by staying offline. (Commits the collection + notification.)
-            await record_and_send_receipt(
-                session, client_id=client_id, phone_number=client_phone,
-                amount=amount, receipt_id=collection.receipt_id,
+            # Create communication/verification ledger + durable outbox in this
+            # same transaction. No provider call is made here, so offline sync
+            # commits are not coupled to SMS/phone availability.
+            await ensure_collection_verification_event(
+                session,
+                collection=collection,
+                client=client,
+                actor=_officer,
             )
+            return {"status": "completed", "id": collection.id, "duplicate": False}
 
         elif entity_type in ("visit", "visit_checkin"):
             visit = VisitCheckin(

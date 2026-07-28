@@ -66,9 +66,9 @@ async def test_collection_amount_capped_at_outstanding(client: AsyncClient):
     assert "exceeds the outstanding" in resp.json()["detail"].lower()
 
 
-# ── The anti-fraud SMS receipt fires ─────────────────────────────────────
+# ── The anti-fraud receipt is recorded in the communication ledger ────────
 
-async def test_collection_sends_client_receipt(client: AsyncClient):
+async def test_collection_records_pending_client_receipt_when_dispatch_disabled(client: AsyncClient):
     token = await login(client, "FO-208")
     await client.post("/api/v1/collections/", headers=auth(token),
                       json={"client_id": 1, "amount": 2500, "payment_method": "cash"})
@@ -77,7 +77,7 @@ async def test_collection_sends_client_receipt(client: AsyncClient):
     data = receipts.json()["data"]
     assert len(data) >= 1
     top = data[0]
-    assert top["status"] == "sent"
+    assert top["status"] == "pending"
     assert "2,500" in top["message"]
     assert top["phone_number"] == "+977-9800000001"
 

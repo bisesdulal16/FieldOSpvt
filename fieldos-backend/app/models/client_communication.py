@@ -1,0 +1,105 @@
+from datetime import datetime
+from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+
+
+class ClientCommunicationEvent(Base):
+    """Official ledger event for client-facing protection/communication.
+
+    This is intentionally broader than post-payment verification so the same
+    ledger can later support due reminders, overdue reminders, PTP reminders,
+    dispute acknowledgements, and protection alerts without inventing a second
+    queue/state model. Phase 1 implements only collection_verification.
+    """
+
+    __tablename__ = "client_communication_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    collection_id: Mapped[int | None] = mapped_column(ForeignKey("collections.id"), nullable=True, index=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    officer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+    # Extensible purpose. Supported values include:
+    # collection_verification, payment_due_reminder, payment_overdue_reminder,
+    # promise_to_pay_reminder, dispute_acknowledgement, client_protection_alert.
+    purpose: Mapped[str] = mapped_column(String(50), nullable=False, default="collection_verification", index=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, default="collection_verification", index=True)
+    verification_type: Mapped[str | None] = mapped_column(String(30), nullable=True, default="receipt")
+    risk_level: Mapped[str] = mapped_column(String(20), nullable=False, default="normal", index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True, index=True)
+
+    # Scheduling/cancellation fields. Immediate events have scheduled_for NULL.
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    source_system: Mapped[str] = mapped_column(String(50), nullable=False, default="fieldos")
+    source_reference: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    language: Mapped[str] = mapped_column(String(12), nullable=False, default="en")
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, default="normal", index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    disputed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ClientCommunicationAttempt(Base):
+    """One channel/provider attempt for a client communication event."""
+
+    __tablename__ = "client_communication_attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("client_communication_events.id"), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # sms|ivr|ai_call|manual
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="log", index=True)
+    provider_reference: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    recipient: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued", index=True)
+
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_response: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ClientCommunicationOutbox(Base):
+    """Transactional outbox row created with the official ledger event.
+
+    Workers will publish these rows to RabbitMQ later. Phase 1 only creates the
+    durable row; no external queue is required for collection commits to succeed.
+    """
+
+    __tablename__ = "client_communication_outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("client_communication_events.id"), nullable=False, index=True)
+    attempt_id: Mapped[int | None] = mapped_column(ForeignKey("client_communication_attempts.id"), nullable=True, index=True)
+    queue_name: Mapped[str] = mapped_column(String(80), nullable=False, default="client_communication.sms", index=True)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, unique=True, index=True)
+    available_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
