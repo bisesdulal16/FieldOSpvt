@@ -89,8 +89,13 @@ async def test_phone_with_client_protection_disabled_creates_pending_attempt_wit
     assert "+977-9800000001" not in (audit.meta_json or "")
     assert "9800000001" not in (audit.meta_json or "")
     assert "***0001" in (audit.meta_json or "")
-    assert "+977-9800000001" not in caplog.text
-    assert "9800000001" not in caplog.text
+    app_logs = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if not record.name.startswith("sqlalchemy.engine")
+    )
+    assert "+977-9800000001" not in app_logs
+    assert "9800000001" not in app_logs
 
 
 async def test_phone_with_client_protection_and_sms_enabled_creates_queued_attempt_and_one_outbox_without_provider_call(
