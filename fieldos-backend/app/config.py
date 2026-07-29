@@ -94,6 +94,7 @@ class Settings:
     SMS_SPARROW_URL: str = os.getenv("SMS_SPARROW_URL", "https://api.sparrowsms.com/v2/sms/")
     SMS_REQUEST_TIMEOUT_SECONDS: float = float(os.getenv("SMS_REQUEST_TIMEOUT_SECONDS", "10"))
     SMS_CALLBACK_SECRET: str = os.getenv("SMS_CALLBACK_SECRET", "")
+    SMS_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS: int = int(os.getenv("SMS_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS", "300"))
     JASMIN_HTTP_URL: str = os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401/send")
 
     # ── Error monitoring (Sentry) ─────────────────────────────────────────

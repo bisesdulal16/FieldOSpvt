@@ -30,6 +30,7 @@ from app.models.client_communication import (
     ClientCommunicationAttempt,
     ClientCommunicationOutbox,
     ClientCommunicationWorkerHeartbeat,
+    ClientCommunicationCallbackReceipt,
 )
 
 __all__ = [
@@ -64,5 +65,6 @@ __all__ = [
     "ClientCommunicationAttempt",
     "ClientCommunicationOutbox",
     "ClientCommunicationWorkerHeartbeat",
+    "ClientCommunicationCallbackReceipt",
     "Announcement",
 ]
