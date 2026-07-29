@@ -22,10 +22,9 @@ from app.models.client_communication import ClientCommunicationAttempt, ClientCo
 from app.models.task import TaskAssignment
 from app.models.user import Department, User, UserRole
 from app.services.audit_helper import write_audit
+from app.services.replay_store import ReplayStoreError, mark_n8n_nonce_seen
 
 logger = logging.getLogger(__name__)
-
-_REPLAY_CACHE: dict[str, datetime] = {}
 SERVICE_ACTOR = type("N8NServiceActor", (), {"id": None, "role": "integration:n8n", "department": "integration"})()
 FINAL_EVENT_STATUSES = {"cancelled", "confirmed", "disputed", "suppressed"}
 FAILED_STATUSES = {"failed", "rejected", "expired", "dead_letter", "no_phone"}
@@ -120,14 +119,6 @@ async def verify_n8n_request(request: Request, db: AsyncSession) -> N8NAuthConte
     if age > settings.N8N_TIMESTAMP_TOLERANCE_SECONDS:
         await reject(db, "expired n8n timestamp")
 
-    replay_key = f"{timestamp}:{nonce}:{signature}"
-    cutoff = _now() - timedelta(seconds=settings.N8N_TIMESTAMP_TOLERANCE_SECONDS)
-    for key, seen_at in list(_REPLAY_CACHE.items()):
-        if seen_at < cutoff:
-            _REPLAY_CACHE.pop(key, None)
-    if replay_key in _REPLAY_CACHE:
-        await reject(db, "replayed n8n request")
-
     body = await request.body()
     if len(body) > MAX_N8N_REQUEST_BODY_BYTES:
         await reject(db, "n8n request body too large", status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
@@ -137,9 +128,20 @@ async def verify_n8n_request(request: Request, db: AsyncSession) -> N8NAuthConte
     if not hmac.compare_digest(expected, supplied):
         await reject(db, "invalid n8n signature")
 
-    _REPLAY_CACHE[replay_key] = _now()
-    await write_n8n_audit(db, "n8n_integration_request_received", "n8n_integration", meta={"nonce_digest": hashlib.sha256(nonce.encode()).hexdigest()[:16]})
-    return N8NAuthContext(timestamp=timestamp, nonce=nonce, signature_digest=hashlib.sha256(supplied.encode()).hexdigest()[:16])
+    signature_digest = hashlib.sha256(supplied.encode()).hexdigest()[:16]
+    replay_result = None
+    try:
+        replay_result = await mark_n8n_nonce_seen(nonce=nonce, integration_scope="n8n")
+    except ReplayStoreError:
+        await reject(db, "n8n replay store unavailable", status.HTTP_503_SERVICE_UNAVAILABLE)
+    if replay_result is None:
+        await reject(db, "n8n replay store unavailable", status.HTTP_503_SERVICE_UNAVAILABLE)
+    assert replay_result is not None
+    if not replay_result.accepted:
+        await reject(db, "replayed n8n request")
+
+    await write_n8n_audit(db, "n8n_integration_request_received", "n8n_integration", meta={"nonce_digest": hashlib.sha256(nonce.encode()).hexdigest()[:16], "replay_store": replay_result.store})
+    return N8NAuthContext(timestamp=timestamp, nonce=nonce, signature_digest=signature_digest)
 
 
 def scoped_event_query(branch_id: int | None = None):

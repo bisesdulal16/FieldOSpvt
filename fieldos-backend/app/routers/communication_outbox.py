@@ -7,6 +7,7 @@ from app.database import get_db
 from app.deps.auth_deps import require_financial_access, require_manager_or_admin
 from app.schemas.common import ApiResponse
 from app.services.communication_outbox_service import prometheus_metrics, queue_health
+from app.services.communication_broker import broker_health
 
 router = APIRouter(
     prefix="/client-communication/outbox",
@@ -17,7 +18,9 @@ router = APIRouter(
 
 @router.get("/health", response_model=ApiResponse)
 async def communication_outbox_health(db: AsyncSession = Depends(get_db)):
-    return ApiResponse(success=True, data=await queue_health(db), timestamp=int(time.time()))
+    data = await queue_health(db)
+    data.update(await broker_health())
+    return ApiResponse(success=True, data=data, timestamp=int(time.time()))
 
 
 @router.get("/metrics", response_class=PlainTextResponse)

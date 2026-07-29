@@ -61,3 +61,42 @@ jobs:
         run: docker build -t fieldos-backend:ci ./fieldos-backend
       - name: Build dashboard image
         run: docker build -t fieldos-dashboard:ci ./fieldos-dashboard
+
+  messaging-infra-validation:
+    name: Messaging infra — config/imports/secrets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fieldos-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Worker module imports
+        run: |
+          python - <<'PY'
+          import app.workers.communication_publisher
+          import app.workers.communication_consumer
+          import app.services.communication_broker
+          import app.services.replay_store
+          PY
+      - name: Workflow JSON still valid
+        working-directory: .
+        run: python -m json.tool n8n/workflows/client-protection-daily-report.json >/dev/null && for f in n8n/workflows/*.json; do python -m json.tool "$f" >/dev/null; done
+      - name: Compose config validates
+        working-directory: .
+        env:
+          FIELDOS_RABBITMQ_PASSWORD: ci_placeholder_password
+          FIELDOS_REDIS_PASSWORD: ci_placeholder_password
+          DATABASE_URL: postgresql+asyncpg://fieldos:ci@postgres:5432/fieldos_nepal
+        run: docker compose -f infra/client-protection/compose.yml config >/dev/null
+      - name: No secrets in infra files
+        working-directory: .
+        run: |
+          ! grep -RInE '(ghp_|xox[baprs]-|sk-[A-Za-z0-9]|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)' infra/client-protection

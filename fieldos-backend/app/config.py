@@ -76,6 +76,7 @@ class Settings:
 
     # ── Communication outbox worker (Phase 2, safe-off by default) ─────────
     COMMUNICATION_WORKER_ENABLED: bool = os.getenv("COMMUNICATION_WORKER_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    COMMUNICATION_DISPATCH_MODE: str = os.getenv("COMMUNICATION_DISPATCH_MODE", "postgres").strip().lower()
     OUTBOX_POLL_INTERVAL_SECONDS: float = float(os.getenv("OUTBOX_POLL_INTERVAL_SECONDS", "2"))
     OUTBOX_BATCH_SIZE: int = int(os.getenv("OUTBOX_BATCH_SIZE", "50"))
     OUTBOX_LOCK_TIMEOUT_SECONDS: int = int(os.getenv("OUTBOX_LOCK_TIMEOUT_SECONDS", "300"))
@@ -83,6 +84,22 @@ class Settings:
     OUTBOX_BASE_RETRY_SECONDS: int = int(os.getenv("OUTBOX_BASE_RETRY_SECONDS", "30"))
     OUTBOX_MAX_RETRY_SECONDS: int = int(os.getenv("OUTBOX_MAX_RETRY_SECONDS", "3600"))
     OUTBOX_LOG_PROVIDER_FAIL_PERCENT: float = float(os.getenv("OUTBOX_LOG_PROVIDER_FAIL_PERCENT", "0"))
+
+    # ── RabbitMQ broker dispatch (Phase 8, safe-off by default) ───────────
+    RABBITMQ_ENABLED: bool = os.getenv("RABBITMQ_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "")
+    RABBITMQ_VHOST: str = os.getenv("RABBITMQ_VHOST", "/fieldos")
+    RABBITMQ_EXCHANGE: str = os.getenv("RABBITMQ_EXCHANGE", "fieldos.communication")
+    RABBITMQ_PREFETCH: int = int(os.getenv("RABBITMQ_PREFETCH", "20"))
+    RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS: int = int(os.getenv("RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS", "10"))
+    RABBITMQ_RECONNECT_SECONDS: int = int(os.getenv("RABBITMQ_RECONNECT_SECONDS", "5"))
+    RABBITMQ_MAX_RETRIES: int = int(os.getenv("RABBITMQ_MAX_RETRIES", "5"))
+
+    # ── Dedicated Redis for short-lived communication coordination only ───
+    REDIS_ENABLED: bool = os.getenv("REDIS_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    REDIS_URL: str = os.getenv("REDIS_URL", "")
+    REDIS_KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "fieldos")
+    REDIS_MAXMEMORY: str = os.getenv("REDIS_MAXMEMORY", "256mb")
 
     # ── SMS gateway (client receipt notifications) ────────────────────────
     # SMS_PROVIDER=log          → dev/demo: records the message, sends nothing
@@ -120,6 +137,8 @@ class Settings:
     N8N_RANDOM_SAMPLE_PERCENT: float = float(os.getenv("N8N_RANDOM_SAMPLE_PERCENT", "0"))
     N8N_PROVIDER_FAILURE_THRESHOLD: int = int(os.getenv("N8N_PROVIDER_FAILURE_THRESHOLD", "10"))
     N8N_BACKLOG_AGE_THRESHOLD_SECONDS: int = int(os.getenv("N8N_BACKLOG_AGE_THRESHOLD_SECONDS", "900"))
+    N8N_REPLAY_STORE: str = os.getenv("N8N_REPLAY_STORE", "memory").strip().lower()
+    N8N_REPLAY_TTL_SECONDS: int = int(os.getenv("N8N_REPLAY_TTL_SECONDS", "300"))
 
     # ── Error monitoring (Sentry) ─────────────────────────────────────────
     # Set SENTRY_DSN in production to capture exceptions. Unset = disabled (no-op).
