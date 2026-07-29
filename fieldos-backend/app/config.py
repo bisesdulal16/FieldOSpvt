@@ -97,6 +97,18 @@ class Settings:
     SMS_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS: int = int(os.getenv("SMS_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS", "300"))
     JASMIN_HTTP_URL: str = os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401/send")
 
+    # ── Scheduled client communication reminders (Phase 5, safe-off) ───────
+    REMINDERS_ENABLED: bool = os.getenv("REMINDERS_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    REMINDER_DUE_DAYS_BEFORE: int = int(os.getenv("REMINDER_DUE_DAYS_BEFORE", "1"))
+    REMINDER_OVERDUE_DAYS: str = os.getenv("REMINDER_OVERDUE_DAYS", "1,3,7")
+    REMINDER_QUIET_HOURS_START: str = os.getenv("REMINDER_QUIET_HOURS_START", "20:00")
+    REMINDER_QUIET_HOURS_END: str = os.getenv("REMINDER_QUIET_HOURS_END", "08:00")
+    REMINDER_MAX_PER_CLIENT_PER_DAY: int = int(os.getenv("REMINDER_MAX_PER_CLIENT_PER_DAY", "1"))
+    REMINDER_MAX_PER_CLIENT_PER_WEEK: int = int(os.getenv("REMINDER_MAX_PER_CLIENT_PER_WEEK", "3"))
+    REMINDER_DEFAULT_LANGUAGE: str = os.getenv("REMINDER_DEFAULT_LANGUAGE", "ne")
+    REMINDER_TIMEZONE: str = os.getenv("REMINDER_TIMEZONE", "Asia/Kathmandu")
+    REMINDER_LOOKAHEAD_DAYS: int = int(os.getenv("REMINDER_LOOKAHEAD_DAYS", "7"))
+
     # ── Error monitoring (Sentry) ─────────────────────────────────────────
     # Set SENTRY_DSN in production to capture exceptions. Unset = disabled (no-op).
     SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")

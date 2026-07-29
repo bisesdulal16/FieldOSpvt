@@ -13,6 +13,7 @@ from app.schemas.common import ApiResponse
 from app.services import auth_service
 from app.services.audit_helper import write_audit
 from app.services.client_communication_service import ensure_collection_verification_event
+from app.services.communication_reminders import cancel_pending_reminders_for_payment
 from app.deps.auth_deps import get_current_user, require_financial_access, can_see_all_branches
 from app.utils.nepal_time import to_nepal_iso
 
@@ -125,6 +126,17 @@ async def create_collection(
         if client:
             client.outstanding_balance = outstanding_after
             client.due_amount = max(0.0, float(client.due_amount) - amount)
+
+        # Cancel only pending reminder communications after a real payment is
+        # recorded. Collection verification receipts remain independent and are
+        # created below; submitted/delivered historical attempts are untouched.
+        if client:
+            await cancel_pending_reminders_for_payment(
+                db,
+                client_id=client.id,
+                branch_id=current_user.branch_id,
+                reason="payment_recorded",
+            )
 
         # Append-only audit of a sensitive money action, tied to the authenticated officer.
         await write_audit(
