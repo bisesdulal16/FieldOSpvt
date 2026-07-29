@@ -132,7 +132,8 @@ type ViewId =
   | 'pilot-kpis'
   | 'data-sync'
   | 'sync-log'
-  | 'announcements';
+  | 'announcements'
+  | 'client-protection';
 
 interface StoredUser {
   name: string;
@@ -156,6 +157,7 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'audit', label: 'Audit Logs', icon: <FileText className="h-5 w-5" /> },
   { id: 'loan-approvals', label: 'Loan Approvals', icon: <BadgeCheck className="h-5 w-5" /> },
   { id: 'receipts', label: 'Client Receipts', icon: <Send className="h-5 w-5" /> },
+  { id: 'client-protection', label: 'Client Protection', icon: <Shield className="h-5 w-5" /> },
   { id: 'day-starts', label: 'Day-Start Attendance', icon: <MapPin className="h-5 w-5" /> },
   { id: 'staff-map', label: 'Staff Map', icon: <MapPin className="h-5 w-5" /> },
   { id: 'cash-anomalies', label: 'Cash & Anomalies', icon: <ShieldAlert className="h-5 w-5" /> },
@@ -5957,7 +5959,7 @@ function ClientReceiptsView({ enabled }: { enabled: boolean }) {
                     <th className="py-2 pr-4 font-medium">Client</th>
                     <th className="py-2 pr-4 font-medium">Phone</th>
                     <th className="py-2 pr-4 font-medium">Receipt</th>
-                    <th className="py-2 pr-4 font-medium">Message</th>
+                    <th className="py-2 pr-4 font-medium">Message visibility</th>
                     <th className="py-2 pr-4 font-medium">Status</th>
                   </tr>
                 </thead>
@@ -5967,7 +5969,7 @@ function ClientReceiptsView({ enabled }: { enabled: boolean }) {
                       <td className="py-2 pr-4 font-medium text-gray-900 whitespace-nowrap">{r.client_name}<span className="text-gray-400"> · {r.member_id}</span></td>
                       <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{r.phone_number || '—'}</td>
                       <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{r.receipt_id}</td>
-                      <td className="py-2 pr-4 text-gray-600 max-w-md">{r.message}</td>
+                      <td className="py-2 pr-4 text-gray-600 max-w-md">{r.message_preview || 'SMS body hidden by default'}</td>
                       <td className="py-2 pr-4"><span className={`text-xs font-medium px-2 py-0.5 rounded ${statusStyle[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span></td>
                     </tr>
                   ))}
@@ -6362,6 +6364,257 @@ function AnnouncementsView({ enabled }: { enabled: boolean }) {
   );
 }
 
+
+
+// ── Client Protection Dashboard ─────────────────────────────────────────────
+
+type ProtectionSummary = {
+  counts?: Record<string, number>;
+  rates?: Record<string, number | string>;
+};
+
+type ProtectionEventRow = {
+  event_id: number;
+  client_id: number | null;
+  branch_id: number | null;
+  officer_id: number | null;
+  purpose: string;
+  event_status: string;
+  attempt_status: string | null;
+  channel: string | null;
+  provider: string | null;
+  recipient_masked: string | null;
+  created_at: string | null;
+  scheduled_for: string | null;
+};
+
+type ProtectionException = {
+  type: string;
+  severity: string;
+  event_id: number | null;
+  client_id: number | null;
+  branch_id: number | null;
+  purpose: string | null;
+  detail: string;
+  created_at: string | null;
+};
+
+function statusBadgeClass(status?: string | null) {
+  switch (status) {
+    case 'delivered':
+    case 'confirmed':
+      return 'bg-green-100 text-green-800 border-green-200';
+    case 'failed':
+    case 'dead':
+    case 'dead_letter':
+    case 'disputed':
+      return 'bg-red-100 text-red-800 border-red-200';
+    case 'no_phone':
+    case 'expired':
+    case 'rejected':
+      return 'bg-amber-100 text-amber-800 border-amber-200';
+    case 'cancelled':
+      return 'bg-gray-100 text-gray-700 border-gray-200';
+    default:
+      return 'bg-blue-100 text-blue-800 border-blue-200';
+  }
+}
+
+function severityBadgeClass(severity?: string | null) {
+  switch (severity) {
+    case 'critical': return 'bg-red-600 text-white';
+    case 'high': return 'bg-orange-500 text-white';
+    case 'warning': return 'bg-amber-500 text-white';
+    default: return 'bg-slate-500 text-white';
+  }
+}
+
+function ProtectionMetricCard({ label, value, helper }: { label: string; value: React.ReactNode; helper?: string }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
+        <p className="mt-2 text-2xl font-bold text-gray-900">{value}</p>
+        {helper && <p className="mt-1 text-xs text-gray-500">{helper}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ClientProtectionView({ enabled }: { enabled: boolean }) {
+  const [purpose, setPurpose] = useState('');
+  const [severity, setSeverity] = useState('');
+  const [query, setQuery] = useState('page=1&page_size=20');
+
+  const summary = useManagerAPI<ProtectionSummary>(`manager/client-protection/summary?${query}`, enabled);
+  const events = useManagerAPI<{ items: ProtectionEventRow[]; pagination: { total: number } }>(`manager/client-protection/events?${query}`, enabled);
+  const reminders = useManagerAPI<{ items: ProtectionEventRow[]; pagination: { total: number } }>(`manager/client-protection/reminders?${query}`, enabled);
+  const exceptions = useManagerAPI<{ items: ProtectionException[]; pagination: { total: number } }>(`manager/client-protection/exceptions?${query}${severity ? `&exception_severity=${encodeURIComponent(severity)}` : ''}`, enabled);
+  const health = useManagerAPI<Record<string, unknown>>('manager/client-protection/worker-health', enabled);
+
+  function applyFilters() {
+    const params = new URLSearchParams({ page: '1', page_size: '20' });
+    if (purpose) params.set('purpose', purpose);
+    setQuery(params.toString());
+  }
+
+  if (summary.error?.includes('403') || events.error?.includes('403')) {
+    return (
+      <Card className="border-red-200 bg-red-50">
+        <CardContent className="p-6">
+          <div className="flex items-center gap-3 text-red-800">
+            <Lock className="h-5 w-5" />
+            <div>
+              <h2 className="text-lg font-semibold">Access denied</h2>
+              <p className="text-sm">Client Protection contains financial and dispute data. Admin IT and platform-health views are excluded.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const counts = summary.data?.counts || {};
+  const rates = summary.data?.rates || {};
+  const loading = summary.loading || events.loading || exceptions.loading;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Client Protection</h1>
+          <p className="text-sm text-gray-500">Read-only visibility into verification, reminders, delivery, exceptions, and worker health.</p>
+        </div>
+        <Button variant="outline" onClick={() => window.open('/api/fieldos/manager/client-protection/export.csv', '_blank')}>
+          <Download className="mr-2 h-4 w-4" /> Export masked CSV
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Input aria-label="Purpose filter" placeholder="purpose e.g. payment_due_reminder" value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+            <Input aria-label="Exception severity filter" placeholder="severity e.g. high" value={severity} onChange={(e) => setSeverity(e.target.value)} />
+            <Button onClick={applyFilters}><Search className="mr-2 h-4 w-4" />Apply filters</Button>
+            <Button variant="ghost" onClick={() => { setPurpose(''); setSeverity(''); setQuery('page=1&page_size=20'); }}>Clear</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {loading && <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading protection dashboard…</div>}
+      {(summary.error || events.error || exceptions.error) && <Card className="border-amber-200 bg-amber-50"><CardContent className="p-4 text-sm text-amber-800">Dashboard data could not be loaded. {summary.error || events.error || exceptions.error}</CardContent></Card>}
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <ProtectionMetricCard label="Collections verified" value={counts.confirmed_count ?? 0} helper={`Verification rate ${rates.verification_rate ?? 0}%`} />
+        <ProtectionMetricCard label="Messages delivered" value={counts.delivered_count ?? 0} helper={`Delivery rate ${rates.delivery_rate ?? 0}%`} />
+        <ProtectionMetricCard label="Disputes" value={counts.disputed_count ?? 0} helper={`Dispute rate ${rates.dispute_rate ?? 0}%`} />
+        <ProtectionMetricCard label="No phone" value={counts.no_phone_count ?? 0} helper={`No-phone rate ${rates.no_phone_rate ?? 0}%`} />
+        <ProtectionMetricCard label="Failed" value={counts.failed_count ?? 0} />
+        <ProtectionMetricCard label="Overdue reminders" value={counts.overdue_reminder_count ?? 0} />
+        <ProtectionMetricCard label="Dead-letter jobs" value={counts.dead_letter_count ?? 0} />
+        <ProtectionMetricCard label="Throttle/suppression" value={`${counts.reminder_throttle_count ?? 0}/${counts.reminder_suppression_count ?? 0}`} helper="throttled / suppressed" />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle>Reminder status trend</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-lg bg-blue-50 p-3">Due reminders<br /><span className="text-xl font-semibold">{counts.due_reminder_count ?? 0}</span></div>
+              <div className="rounded-lg bg-orange-50 p-3">Overdue reminders<br /><span className="text-xl font-semibold">{counts.overdue_reminder_count ?? 0}</span></div>
+              <div className="rounded-lg bg-purple-50 p-3">Promise-to-pay<br /><span className="text-xl font-semibold">{counts.promise_to_pay_reminder_count ?? 0}</span></div>
+              <div className="rounded-lg bg-green-50 p-3">Center meetings<br /><span className="text-xl font-semibold">{counts.center_meeting_reminder_count ?? 0}</span></div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Provider / worker health</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm text-gray-700">
+            <p>Worker enabled: <strong>{String(health.data?.worker_enabled ?? false)}</strong></p>
+            <p>Database reachable: <strong>{String(health.data?.database_reachable ?? false)}</strong></p>
+            <p>Recently polled: <strong>{String(health.data?.recently_polled ?? false)}</strong></p>
+            <p>Recently dispatched: <strong>{String(health.data?.recently_dispatched ?? false)}</strong></p>
+            <p>Pending: <strong>{String(health.data?.pending_count ?? 0)}</strong></p>
+            <p>Processing: <strong>{String(health.data?.processing_count ?? 0)}</strong></p>
+            <p>Retryable: <strong>{String(health.data?.retryable_count ?? 0)}</strong></p>
+            <p>Dead: <strong>{String(health.data?.dead_count ?? 0)}</strong></p>
+            <p>Oldest pending age: <strong>{String(health.data?.oldest_pending_age_seconds ?? 'none')}</strong></p>
+            <p className="text-xs text-gray-500">Safe operational data only. No client payloads or SMS bodies are shown.</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle>Recent collection verifications & messages</CardTitle></CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-gray-500"><th>Event</th><th>Purpose</th><th>Status</th><th>Phone</th><th>Provider</th></tr></thead>
+                <tbody>
+                  {(events.data?.items || []).map((row) => (
+                    <tr key={`${row.event_id}-${row.attempt_status}`} className="border-t">
+                      <td className="py-2">#{row.event_id}</td>
+                      <td>{row.purpose}</td>
+                      <td><Badge className={statusBadgeClass(row.attempt_status || row.event_status)}>{row.attempt_status || row.event_status}</Badge></td>
+                      <td>{row.recipient_masked || 'no phone'}</td>
+                      <td>{row.provider || '—'}</td>
+                    </tr>
+                  ))}
+                  {!events.loading && (events.data?.items || []).length === 0 && <tr><td colSpan={5} className="py-6 text-center text-gray-500">No communication events found.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Exceptions</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {(exceptions.data?.items || []).map((item, idx) => (
+                <div key={`${item.type}-${item.event_id}-${idx}`} className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium">{item.type.replaceAll('_', ' ')}</div>
+                    <Badge className={severityBadgeClass(item.severity)}>{item.severity}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600">{item.detail}</p>
+                  <p className="mt-1 text-xs text-gray-500">Event #{item.event_id ?? '—'} · Client #{item.client_id ?? '—'} · Branch #{item.branch_id ?? '—'}</p>
+                </div>
+              ))}
+              {!exceptions.loading && (exceptions.data?.items || []).length === 0 && <div className="py-6 text-center text-sm text-gray-500">No exceptions for current filters.</div>}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle>Upcoming and overdue reminders</CardTitle></CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-gray-500"><th>Event</th><th>Client</th><th>Purpose</th><th>Status</th><th>Scheduled</th><th>Phone</th></tr></thead>
+              <tbody>
+                {(reminders.data?.items || []).map((row) => (
+                  <tr key={`reminder-${row.event_id}`} className="border-t">
+                    <td className="py-2">#{row.event_id}</td>
+                    <td>{row.client_id ?? '—'}</td>
+                    <td>{row.purpose}</td>
+                    <td><Badge className={statusBadgeClass(row.attempt_status || row.event_status)}>{row.attempt_status || row.event_status}</Badge></td>
+                    <td>{row.scheduled_for || row.created_at || '—'}</td>
+                    <td>{row.recipient_masked || 'no phone'}</td>
+                  </tr>
+                ))}
+                {!reminders.loading && (reminders.data?.items || []).length === 0 && <tr><td colSpan={6} className="py-6 text-center text-gray-500">No reminders found.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── Main App ─────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -6499,6 +6752,8 @@ export default function DashboardPage() {
         return <LoanApprovalsView enabled={activeView === 'loan-approvals'} />;
       case 'receipts':
         return <ClientReceiptsView enabled={activeView === 'receipts'} />;
+      case 'client-protection':
+        return <ClientProtectionView enabled={activeView === 'client-protection'} />;
       case 'day-starts':
         return <DayStartsView enabled={activeView === 'day-starts'} />;
       case 'staff-map':

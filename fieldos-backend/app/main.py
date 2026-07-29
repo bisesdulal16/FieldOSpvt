@@ -52,6 +52,7 @@ from app.routers import (
     communication_outbox,
     communication_callbacks,
     communication_reminders,
+    client_protection_dashboard,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,7 @@ app.include_router(feedback.router, prefix=settings.API_V1_PREFIX, tags=["Feedba
 app.include_router(communication_outbox.router, prefix=settings.API_V1_PREFIX, tags=["Client Communication Outbox"])
 app.include_router(communication_callbacks.router, prefix=settings.API_V1_PREFIX, tags=["Client Communication Callbacks"])
 app.include_router(communication_reminders.router, prefix=settings.API_V1_PREFIX, tags=["Client Communication Reminders"])
+app.include_router(client_protection_dashboard.router, prefix=settings.API_V1_PREFIX, tags=["Client Protection Dashboard"])
 
 # Announcements: two routers — manager (POST) + mobile (GET)
 app.include_router(announcements.manager_router, prefix=settings.API_V1_PREFIX, tags=["Announcements"])
