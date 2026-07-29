@@ -1,0 +1,122 @@
+# FieldOS Client Protection Messaging Infrastructure — Phase 8
+# Safe by default: services are not started unless an operator explicitly runs this compose file.
+# Copy .env.example to .env, fill generated credentials, then run only after approval.
+
+name: fieldos-client-protection
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: fieldos-client-protection-rabbitmq
+    hostname: fieldos-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${FIELDOS_RABBITMQ_USER:-fieldos}
+      RABBITMQ_DEFAULT_PASS: ${FIELDOS_RABBITMQ_PASSWORD:?set FIELDOS_RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${FIELDOS_RABBITMQ_VHOST:-/fieldos}
+    volumes:
+      - ${FIELDOS_CLIENT_PROTECTION_DATA_DIR:-/mnt/hdd-internal/fieldos-client-protection}/rabbitmq:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./rabbitmq/definitions.example.json:/etc/rabbitmq/definitions.json:ro
+    ports:
+      # Management is loopback-bound only. Do not expose publicly.
+      - "127.0.0.1:${FIELDOS_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    expose:
+      - "5672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - fieldos-client-protection
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: fieldos-client-protection-redis
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${FIELDOS_REDIS_PASSWORD:?set FIELDOS_REDIS_PASSWORD}", "--maxmemory", "${REDIS_MAXMEMORY:-256mb}"]
+    volumes:
+      - ${FIELDOS_CLIENT_PROTECTION_DATA_DIR:-/mnt/hdd-internal/fieldos-client-protection}/redis:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$FIELDOS_REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    environment:
+      FIELDOS_REDIS_PASSWORD: ${FIELDOS_REDIS_PASSWORD:?set FIELDOS_REDIS_PASSWORD}
+    networks:
+      - fieldos-client-protection
+      - fieldos-app
+    restart: unless-stopped
+
+  outbox-publisher:
+    build: ../../fieldos-backend
+    container_name: fieldos-client-protection-publisher
+    profiles: ["workers"]
+    command: python -m app.workers.communication_publisher
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DB_TYPE: postgres
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      COMMUNICATION_DISPATCH_MODE: rabbitmq
+      COMMUNICATION_WORKER_ENABLED: "true"
+      RABBITMQ_ENABLED: "true"
+      RABBITMQ_URL: amqp://${FIELDOS_RABBITMQ_USER:-fieldos}:${FIELDOS_RABBITMQ_PASSWORD:?set FIELDOS_RABBITMQ_PASSWORD}@rabbitmq:5672/${FIELDOS_RABBITMQ_VHOST_ENCODED:-%2Ffieldos}
+      RABBITMQ_VHOST: ${FIELDOS_RABBITMQ_VHOST:-/fieldos}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-fieldos.communication}
+      RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-20}
+      RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS: ${RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS:-10}
+      RABBITMQ_RECONNECT_SECONDS: ${RABBITMQ_RECONNECT_SECONDS:-5}
+      RABBITMQ_MAX_RETRIES: ${RABBITMQ_MAX_RETRIES:-5}
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      REDIS_URL: ${REDIS_URL:-redis://:${FIELDOS_REDIS_PASSWORD:?set FIELDOS_REDIS_PASSWORD}@redis:6379/0}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-fieldos}
+      N8N_REPLAY_STORE: ${N8N_REPLAY_STORE:-memory}
+      N8N_REPLAY_TTL_SECONDS: ${N8N_REPLAY_TTL_SECONDS:-330}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - fieldos-client-protection
+      - fieldos-app
+    restart: unless-stopped
+
+  sms-consumer:
+    build: ../../fieldos-backend
+    container_name: fieldos-client-protection-sms-consumer
+    profiles: ["workers"]
+    command: python -m app.workers.communication_consumer --queue sms
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DB_TYPE: postgres
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      SMS_PROVIDER: ${SMS_PROVIDER:-log}
+      SMS_API_TOKEN: ${SMS_API_TOKEN:-}
+      COMMUNICATION_DISPATCH_MODE: rabbitmq
+      RABBITMQ_ENABLED: "true"
+      RABBITMQ_URL: amqp://${FIELDOS_RABBITMQ_USER:-fieldos}:${FIELDOS_RABBITMQ_PASSWORD:?set FIELDOS_RABBITMQ_PASSWORD}@rabbitmq:5672/${FIELDOS_RABBITMQ_VHOST_ENCODED:-%2Ffieldos}
+      RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-20}
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      REDIS_URL: ${REDIS_URL:-redis://:${FIELDOS_REDIS_PASSWORD:?set FIELDOS_REDIS_PASSWORD}@redis:6379/0}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-fieldos}
+      N8N_REPLAY_STORE: ${N8N_REPLAY_STORE:-memory}
+      N8N_REPLAY_TTL_SECONDS: ${N8N_REPLAY_TTL_SECONDS:-330}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - fieldos-client-protection
+      - fieldos-app
+    restart: unless-stopped
+
+networks:
+  fieldos-client-protection:
+    name: ${FIELDOS_CLIENT_PROTECTION_NETWORK:-fieldos_client_protection}
+    internal: true
+  fieldos-app:
+    name: ${FIELDOS_APP_NETWORK:-fieldospvt_default}
+    external: true

@@ -39,7 +39,7 @@ FINAL_ATTEMPT_STATUSES = {
     "failed",
 }
 DISPATCH_BLOCKING_STATUSES = FINAL_ATTEMPT_STATUSES - {"failed"}
-CLAIMABLE_OUTBOX_STATUSES = {"pending", "retryable"}
+CLAIMABLE_OUTBOX_STATUSES = {"pending", "retryable", "broker_published"}
 TERMINAL_OUTBOX_STATUSES = {"published", "dead", "cancelled", "skipped"}
 
 _METRICS = {
@@ -301,6 +301,7 @@ async def claim_outbox_batch(
     worker_id: str,
     batch_size: int | None = None,
     lock_timeout_seconds: int | None = None,
+    increment_provider_attempt_count: bool = True,
 ) -> list[ClaimedOutbox]:
     limit = max(1, batch_size or settings.OUTBOX_BATCH_SIZE)
     timeout_seconds = lock_timeout_seconds or settings.OUTBOX_LOCK_TIMEOUT_SECONDS
@@ -308,6 +309,7 @@ async def claim_outbox_batch(
     await recover_stale_locks(session, worker_id, lock_timeout_seconds=timeout_seconds)
     await session.flush()
     now = await _db_now(session)
+    allow_broker_published = settings.COMMUNICATION_DISPATCH_MODE == "postgres"
 
     if _is_postgres(session):
         rows = (
@@ -319,7 +321,7 @@ async def claim_outbox_batch(
                         FROM client_communication_outbox o
                         JOIN client_communication_events e ON e.id = o.event_id
                         JOIN client_communication_attempts a ON a.id = o.attempt_id
-                        WHERE o.status IN ('pending', 'retryable')
+                        WHERE (o.status IN ('pending', 'retryable') OR (:allow_broker_published AND o.status = 'broker_published'))
                           AND (o.available_at IS NULL OR o.available_at <= NOW())
                           AND (o.locked_at IS NULL OR o.locked_at <= (NOW() - (:timeout_seconds * INTERVAL '1 second')))
                           AND e.cancelled_at IS NULL
@@ -335,15 +337,15 @@ async def claim_outbox_batch(
                     SET status = 'processing',
                         locked_at = NOW(),
                         locked_by = :worker_id,
-                        attempt_count = COALESCE(o.attempt_count, 0) + 1,
-                        last_attempted_at = NOW(),
+                        attempt_count = CASE WHEN :increment_provider_attempt_count THEN COALESCE(o.attempt_count, 0) + 1 ELSE COALESCE(o.attempt_count, 0) END,
+                        last_attempted_at = CASE WHEN :increment_provider_attempt_count THEN NOW() ELSE o.last_attempted_at END,
                         updated_at = NOW()
                     FROM claimable
                     WHERE o.id = claimable.id
                     RETURNING o.id, o.attempt_id, o.event_id, o.payload_json, o.idempotency_key, o.attempt_count, o.locked_by
                     """
                 ),
-                {"worker_id": worker_id, "limit": limit, "timeout_seconds": timeout_seconds},
+                {"worker_id": worker_id, "limit": limit, "timeout_seconds": timeout_seconds, "allow_broker_published": allow_broker_published, "increment_provider_attempt_count": increment_provider_attempt_count},
             )
         ).mappings().all()
     else:
@@ -355,7 +357,7 @@ async def claim_outbox_batch(
                     FROM client_communication_outbox o
                     JOIN client_communication_events e ON e.id = o.event_id
                     JOIN client_communication_attempts a ON a.id = o.attempt_id
-                    WHERE o.status IN ('pending', 'retryable')
+                    WHERE (o.status IN ('pending', 'retryable') OR (:allow_broker_published = 1 AND o.status = 'broker_published'))
                       AND (o.available_at IS NULL OR o.available_at <= CURRENT_TIMESTAMP)
                       AND (o.locked_at IS NULL OR o.locked_at <= datetime(CURRENT_TIMESTAMP, '-' || :timeout_seconds || ' seconds'))
                       AND e.cancelled_at IS NULL
@@ -367,7 +369,7 @@ async def claim_outbox_batch(
                     LIMIT :limit
                     """
                 ),
-                {"limit": limit, "timeout_seconds": timeout_seconds},
+                {"limit": limit, "timeout_seconds": timeout_seconds, "allow_broker_published": 1 if allow_broker_published else 0},
             )
         ).scalars().all()
         rows = []
@@ -378,8 +380,9 @@ async def claim_outbox_batch(
             outbox.status = "processing"
             outbox.locked_at = now
             outbox.locked_by = worker_id
-            outbox.attempt_count = (outbox.attempt_count or 0) + 1
-            outbox.last_attempted_at = now
+            if increment_provider_attempt_count:
+                outbox.attempt_count = (outbox.attempt_count or 0) + 1
+                outbox.last_attempted_at = now
             outbox.updated_at = now
             rows.append(
                 {
@@ -399,7 +402,14 @@ async def claim_outbox_batch(
             "communication_outbox_claimed",
             entity_type="client_communication_outbox",
             entity_id=row.id,
-            meta={"outbox_id": row.id, "attempt_id": row.attempt_id, "event_id": row.event_id, "worker_id": worker_id, "attempt_count": row.attempt_count},
+            meta={
+                "outbox_id": row.id,
+                "attempt_id": row.attempt_id,
+                "event_id": row.event_id,
+                "worker_id": worker_id,
+                "provider_attempt_count": row.attempt_count,
+                "claim_kind": "provider_dispatch" if increment_provider_attempt_count else "broker_publication",
+            },
         )
     await upsert_worker_heartbeat(session, worker_id=worker_id, worker_enabled=settings.COMMUNICATION_WORKER_ENABLED, successful_poll=True)
     return claimed
@@ -575,6 +585,9 @@ async def run_once(
     jitter_fn=None,
 ) -> list[ProcessResult]:
     worker_id = worker_id or build_worker_id()
+    if settings.COMMUNICATION_DISPATCH_MODE != "postgres":
+        logger.info("communication postgres worker skipped by dispatch mode", extra={"worker_id": worker_id, "dispatch_mode": settings.COMMUNICATION_DISPATCH_MODE})
+        return []
     if not settings.COMMUNICATION_WORKER_ENABLED:
         async with session_factory() as session:
             await upsert_worker_heartbeat(session, worker_id=worker_id, worker_enabled=False, process_alive=True, successful_poll=False)
@@ -594,7 +607,7 @@ async def queue_health(session: AsyncSession) -> dict:
     db_reachable = True
     now = await _db_now(session)
     counts = {}
-    for status in ["pending", "processing", "retryable", "dead"]:
+    for status in ["pending", "processing", "retryable", "broker_published", "dead"]:
         counts[status] = (
             await session.execute(select(func.count()).select_from(ClientCommunicationOutbox).where(ClientCommunicationOutbox.status == status))
         ).scalar_one()
@@ -620,6 +633,7 @@ async def queue_health(session: AsyncSession) -> dict:
     return {
         "process_alive": any(h.process_alive for h in heartbeats),
         "worker_enabled": settings.COMMUNICATION_WORKER_ENABLED,
+        "dispatch_mode": settings.COMMUNICATION_DISPATCH_MODE,
         "database_reachable": db_reachable,
         "worker_recently_polled": age_seconds(last_poll) is not None and age_seconds(last_poll) <= max(60, settings.OUTBOX_POLL_INTERVAL_SECONDS * 5),
         "worker_recently_dispatched_successfully": age_seconds(last_dispatch) is not None and age_seconds(last_dispatch) <= 3600,
@@ -630,6 +644,7 @@ async def queue_health(session: AsyncSession) -> dict:
         "pending_count": counts["pending"],
         "processing_count": counts["processing"],
         "retryable_count": counts["retryable"],
+        "broker_published_count": counts["broker_published"],
         "dead_count": counts["dead"],
         "oldest_pending_age_seconds": pending_age,
     }
@@ -640,6 +655,7 @@ async def prometheus_metrics(session: AsyncSession) -> str:
     lines = [
         f"outbox_pending_total {health['pending_count']}",
         f"outbox_processing_total {health['processing_count']}",
+        f"outbox_broker_published_total {health['broker_published_count']}",
         f"outbox_dead_total {health['dead_count']}",
         f"outbox_dispatch_success_total {_METRICS['outbox_dispatch_success_total']}",
         f"outbox_dispatch_failure_total {_METRICS['outbox_dispatch_failure_total']}",

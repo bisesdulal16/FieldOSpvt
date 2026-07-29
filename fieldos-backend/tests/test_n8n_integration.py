@@ -20,7 +20,7 @@ from app.services.auth_service import hash_pin
 from tests.conftest import auth, login
 
 SECRET = "test-n8n-secret"
-PHONE = "+977-" + "9800007844"
+PHONE = "+1" + "0000000000"
 MESSAGE = "Sensitive client message body"
 BASE = "/api/v1/integrations/n8n"
 
@@ -141,6 +141,36 @@ async def test_invalid_signature_expired_timestamp_and_replay_rejected(client: A
 
 
 @pytest.mark.asyncio
+async def test_same_nonce_rejected_even_with_new_timestamp_body_and_valid_signature(client: AsyncClient):
+    ids = await _seed_n8n_rows()
+    body1 = b'{"reason":"first"}'
+    body2 = b'{"reason":"second body"}'
+    nonce = "stable-nonce-reuse"
+    first = await client.post(f"{BASE}/events/{ids['disputed_id']}/acknowledge", content=body1, headers=signed_headers(body1, timestamp=int(time.time()), nonce=nonce))
+    reused_timestamp = await client.post(f"{BASE}/events/{ids['disputed_id']}/acknowledge", content=body1, headers=signed_headers(body1, timestamp=int(time.time()) + 1, nonce=nonce))
+    reused_body = await client.post(f"{BASE}/events/{ids['disputed_id']}/acknowledge", content=body2, headers=signed_headers(body2, timestamp=int(time.time()) + 2, nonce=nonce))
+    different_nonce = await client.post(f"{BASE}/events/{ids['disputed_id']}/acknowledge", content=body2, headers=signed_headers(body2, timestamp=int(time.time()) + 3, nonce="different-nonce-ok"))
+    assert first.status_code == 200
+    assert reused_timestamp.status_code == 401
+    assert reused_body.status_code == 401
+    assert different_nonce.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_redis_replay_store_unavailable_rejects_without_domain_mutation(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    ids = await _seed_n8n_rows()
+    monkeypatch.setattr(settings, "N8N_REPLAY_STORE", "redis")
+    monkeypatch.setattr(settings, "REDIS_URL", "")
+    body = json.dumps({"reason": "should not mutate"}).encode()
+    rejected = await client.post(f"{BASE}/events/{ids['disputed_id']}/callback-task", content=body, headers=signed_headers(body, nonce="redis-down"))
+    assert rejected.status_code == 503
+    async with AsyncSessionLocal() as s:
+        tasks = (await s.execute(select(TaskAssignment).where(TaskAssignment.reason.like("%should not mutate%")))).scalars().all()
+    assert tasks == []
+    monkeypatch.setattr(settings, "N8N_REPLAY_STORE", "memory")
+
+
+@pytest.mark.asyncio
 async def test_dispute_escalation_and_callback_task_are_idempotent(client: AsyncClient):
     ids = await _seed_n8n_rows()
     body = json.dumps({"reason": "manager callback", "due_date": "2026-07-30"}).encode()
@@ -164,7 +194,7 @@ async def test_daily_summary_exceptions_no_phone_and_branch_scope_are_masked(cli
     assert exc.status_code == 200
     assert summary.status_code == 200
     text = json.dumps({"exc": exc.json(), "summary": summary.json()})
-    assert "******7844" in text
+    assert "******0000" in text
     assert PHONE not in text
     assert MESSAGE not in text
     assert summary.json()["data"]["counts_by_status"]["no_phone"] == 1

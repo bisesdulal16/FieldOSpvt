@@ -1,0 +1,27 @@
+{
+  "vhosts": [{"name": "/fieldos"}],
+  "exchanges": [
+    {"name": "fieldos.communication", "vhost": "/fieldos", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "fieldos.communication.dlx", "vhost": "/fieldos", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {}}
+  ],
+  "queues": [
+    {"name": "fieldos.communication.sms", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {"x-dead-letter-exchange": "fieldos.communication.dlx", "x-dead-letter-routing-key": "communication.sms.dead"}},
+    {"name": "fieldos.communication.ivr", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {"x-dead-letter-exchange": "fieldos.communication.dlx", "x-dead-letter-routing-key": "communication.ivr.dead"}},
+    {"name": "fieldos.communication.escalation", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {"x-dead-letter-exchange": "fieldos.communication.dlx", "x-dead-letter-routing-key": "communication.escalation.dead"}},
+    {"name": "fieldos.communication.reminder", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {"x-dead-letter-exchange": "fieldos.communication.dlx", "x-dead-letter-routing-key": "communication.reminder.dead"}},
+    {"name": "fieldos.communication.sms.dead", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "fieldos.communication.ivr.dead", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "fieldos.communication.escalation.dead", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "fieldos.communication.reminder.dead", "vhost": "/fieldos", "durable": true, "auto_delete": false, "arguments": {}}
+  ],
+  "bindings": [
+    {"source": "fieldos.communication", "vhost": "/fieldos", "destination": "fieldos.communication.sms", "destination_type": "queue", "routing_key": "communication.sms", "arguments": {}},
+    {"source": "fieldos.communication", "vhost": "/fieldos", "destination": "fieldos.communication.ivr", "destination_type": "queue", "routing_key": "communication.ivr", "arguments": {}},
+    {"source": "fieldos.communication", "vhost": "/fieldos", "destination": "fieldos.communication.escalation", "destination_type": "queue", "routing_key": "communication.escalation", "arguments": {}},
+    {"source": "fieldos.communication", "vhost": "/fieldos", "destination": "fieldos.communication.reminder", "destination_type": "queue", "routing_key": "communication.reminder", "arguments": {}},
+    {"source": "fieldos.communication.dlx", "vhost": "/fieldos", "destination": "fieldos.communication.sms.dead", "destination_type": "queue", "routing_key": "communication.sms.dead", "arguments": {}},
+    {"source": "fieldos.communication.dlx", "vhost": "/fieldos", "destination": "fieldos.communication.ivr.dead", "destination_type": "queue", "routing_key": "communication.ivr.dead", "arguments": {}},
+    {"source": "fieldos.communication.dlx", "vhost": "/fieldos", "destination": "fieldos.communication.escalation.dead", "destination_type": "queue", "routing_key": "communication.escalation.dead", "arguments": {}},
+    {"source": "fieldos.communication.dlx", "vhost": "/fieldos", "destination": "fieldos.communication.reminder.dead", "destination_type": "queue", "routing_key": "communication.reminder.dead", "arguments": {}}
+  ]
+}
