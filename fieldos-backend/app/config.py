@@ -109,6 +109,18 @@ class Settings:
     REMINDER_TIMEZONE: str = os.getenv("REMINDER_TIMEZONE", "Asia/Kathmandu")
     REMINDER_LOOKAHEAD_DAYS: int = int(os.getenv("REMINDER_LOOKAHEAD_DAYS", "7"))
 
+    # ── n8n Client Protection orchestration (Phase 7, safe-off) ───────────
+    N8N_INTEGRATION_ENABLED: bool = os.getenv("N8N_INTEGRATION_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    N8N_WEBHOOK_URL: str = os.getenv("N8N_WEBHOOK_URL", "")
+    N8N_SHARED_SECRET: str = os.getenv("N8N_SHARED_SECRET", "")
+    N8N_REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("N8N_REQUEST_TIMEOUT_SECONDS", "10"))
+    N8N_TIMESTAMP_TOLERANCE_SECONDS: int = int(os.getenv("N8N_TIMESTAMP_TOLERANCE_SECONDS", "300"))
+    N8N_DAILY_REPORT_HOUR: int = int(os.getenv("N8N_DAILY_REPORT_HOUR", "8"))
+    N8N_TIMEZONE: str = os.getenv("N8N_TIMEZONE", "Asia/Kathmandu")
+    N8N_RANDOM_SAMPLE_PERCENT: float = float(os.getenv("N8N_RANDOM_SAMPLE_PERCENT", "0"))
+    N8N_PROVIDER_FAILURE_THRESHOLD: int = int(os.getenv("N8N_PROVIDER_FAILURE_THRESHOLD", "10"))
+    N8N_BACKLOG_AGE_THRESHOLD_SECONDS: int = int(os.getenv("N8N_BACKLOG_AGE_THRESHOLD_SECONDS", "900"))
+
     # ── Error monitoring (Sentry) ─────────────────────────────────────────
     # Set SENTRY_DSN in production to capture exceptions. Unset = disabled (no-op).
     SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
