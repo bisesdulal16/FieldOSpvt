@@ -1,0 +1,211 @@
+{
+  "name": "Client Protection - Random Verification Sampling",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "path": "client-protection---random-verification-sampling",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "Trigger - placeholder only",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nitem.idempotency_key = `n8n:sample:{{$now.toISODate()}}:{{$json.branch_id || \"all\"}}:{{$json.sample_version || \"v1\"}}`;\nitem.safe_payload = { event_id: item.event_id, branch_id: item.branch_id, reason: item.reason, status: item.status, provider: item.provider };\nreturn [{json: item}];"
+      },
+      "id": "idempotency",
+      "name": "Build idempotency key and safe payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.FIELDOS_API_BASE_URL}}/api/v1/integrations/n8n/random-sample",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "jsonBody": "={{$json.safe_payload}}",
+        "options": {
+          "timeout": 10000,
+          "retry": {
+            "maxTries": 2,
+            "waitBetweenTries": 2000
+          }
+        }
+      },
+      "id": "fieldos-api",
+      "name": "Call FieldOS integration API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        540,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PLACEHOLDER_FIELDOS_N8N_HMAC_HEADER_CREDENTIAL",
+          "name": "PLACEHOLDER - FieldOS n8n signed headers"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.success}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "check-result",
+      "name": "Check success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, idempotency_key: $json.data?.idempotency_key } }}"
+      },
+      "id": "success-response",
+      "name": "Success response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1060,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "minutes"
+      },
+      "id": "bounded-retry-wait",
+      "name": "Bounded retry wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1060,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: false, error: \"FieldOS request failed; inspect n8n execution without PII\" } }}"
+      },
+      "id": "error-response",
+      "name": "Error response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Trigger - placeholder only": {
+      "main": [
+        [
+          {
+            "node": "Build idempotency key and safe payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build idempotency key and safe payload": {
+      "main": [
+        [
+          {
+            "node": "Call FieldOS integration API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call FieldOS integration API": {
+      "main": [
+        [
+          {
+            "node": "Check success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check success": {
+      "main": [
+        [
+          {
+            "node": "Success response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Bounded retry wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bounded retry wait": {
+      "main": [
+        [
+          {
+            "node": "Error response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionTimeout": 120,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": [
+    "fieldos",
+    "client-protection",
+    "phase7",
+    "sanitized"
+  ],
+  "pinData": {},
+  "versionId": "placeholder"
+}
