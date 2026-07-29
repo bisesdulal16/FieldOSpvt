@@ -81,7 +81,7 @@ REDIS_URL=
 REDIS_KEY_PREFIX=fieldos
 REDIS_MAXMEMORY=256mb
 N8N_REPLAY_STORE=memory
-N8N_REPLAY_TTL_SECONDS=300
+N8N_REPLAY_TTL_SECONDS=330
 ```
 
 ## Redis replay identity
@@ -136,3 +136,11 @@ N8N_REPLAY_STORE=memory
 ```
 
 Do not delete persistent volumes unless separately approved.
+
+
+## Review hardening notes
+
+- RabbitMQ publication attempt != SMS provider attempt. Broker publication may update only outbox broker metadata (`broker_message_id`, `broker_published_at`, publisher locks, broker retry metadata). Provider attempt counters/status/timestamps change only in the consumer immediately before/after invoking the provider abstraction.
+- Redis replay protection uses stable nonce identity keys: `<REDIS_KEY_PREFIX>:<APP_ENV>:n8n:replay:<integration_scope>:<nonce_digest>`. Timestamp, request body, and signature digest are not part of the key. `N8N_REPLAY_TTL_SECONDS` must be at least `N8N_TIMESTAMP_TOLERANCE_SECONDS + 30`.
+- Network topology: RabbitMQ, Redis, publisher, and consumer share the private `fieldos-client-protection` network. Redis and workers also join the explicit FieldOS app network (`FIELDOS_APP_NETWORK`, default `fieldospvt_default`) so backend/workers can reach Redis/PostgreSQL without joining n8n or public proxy networks. Redis has no host port; RabbitMQ AMQP has no host port; management is loopback-only.
+- RabbitMQ imports topology automatically through `/etc/rabbitmq/rabbitmq.conf` with `management.load_definitions = /etc/rabbitmq/definitions.json`. Definitions carry topology only; secret-bearing user configuration comes from runtime environment and can be tightened by `configure-rabbitmq.sh`.

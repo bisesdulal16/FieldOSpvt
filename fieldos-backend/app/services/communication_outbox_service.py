@@ -301,6 +301,7 @@ async def claim_outbox_batch(
     worker_id: str,
     batch_size: int | None = None,
     lock_timeout_seconds: int | None = None,
+    increment_provider_attempt_count: bool = True,
 ) -> list[ClaimedOutbox]:
     limit = max(1, batch_size or settings.OUTBOX_BATCH_SIZE)
     timeout_seconds = lock_timeout_seconds or settings.OUTBOX_LOCK_TIMEOUT_SECONDS
@@ -336,15 +337,15 @@ async def claim_outbox_batch(
                     SET status = 'processing',
                         locked_at = NOW(),
                         locked_by = :worker_id,
-                        attempt_count = COALESCE(o.attempt_count, 0) + 1,
-                        last_attempted_at = NOW(),
+                        attempt_count = CASE WHEN :increment_provider_attempt_count THEN COALESCE(o.attempt_count, 0) + 1 ELSE COALESCE(o.attempt_count, 0) END,
+                        last_attempted_at = CASE WHEN :increment_provider_attempt_count THEN NOW() ELSE o.last_attempted_at END,
                         updated_at = NOW()
                     FROM claimable
                     WHERE o.id = claimable.id
                     RETURNING o.id, o.attempt_id, o.event_id, o.payload_json, o.idempotency_key, o.attempt_count, o.locked_by
                     """
                 ),
-                {"worker_id": worker_id, "limit": limit, "timeout_seconds": timeout_seconds, "allow_broker_published": allow_broker_published},
+                {"worker_id": worker_id, "limit": limit, "timeout_seconds": timeout_seconds, "allow_broker_published": allow_broker_published, "increment_provider_attempt_count": increment_provider_attempt_count},
             )
         ).mappings().all()
     else:
@@ -379,8 +380,9 @@ async def claim_outbox_batch(
             outbox.status = "processing"
             outbox.locked_at = now
             outbox.locked_by = worker_id
-            outbox.attempt_count = (outbox.attempt_count or 0) + 1
-            outbox.last_attempted_at = now
+            if increment_provider_attempt_count:
+                outbox.attempt_count = (outbox.attempt_count or 0) + 1
+                outbox.last_attempted_at = now
             outbox.updated_at = now
             rows.append(
                 {
@@ -400,7 +402,14 @@ async def claim_outbox_batch(
             "communication_outbox_claimed",
             entity_type="client_communication_outbox",
             entity_id=row.id,
-            meta={"outbox_id": row.id, "attempt_id": row.attempt_id, "event_id": row.event_id, "worker_id": worker_id, "attempt_count": row.attempt_count},
+            meta={
+                "outbox_id": row.id,
+                "attempt_id": row.attempt_id,
+                "event_id": row.event_id,
+                "worker_id": worker_id,
+                "provider_attempt_count": row.attempt_count,
+                "claim_kind": "provider_dispatch" if increment_provider_attempt_count else "broker_publication",
+            },
         )
     await upsert_worker_heartbeat(session, worker_id=worker_id, worker_enabled=settings.COMMUNICATION_WORKER_ENABLED, successful_poll=True)
     return claimed

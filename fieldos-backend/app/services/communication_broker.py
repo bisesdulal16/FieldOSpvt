@@ -171,17 +171,20 @@ async def mark_broker_failure(session: AsyncSession, *, outbox_id: int, worker_i
     outbox.locked_by = None
     outbox.last_error = str(error)[:1000]
     outbox.last_error_code = "broker_publish_failed"
-    final = (outbox.attempt_count or 0) >= min(outbox.max_retries or settings.RABBITMQ_MAX_RETRIES, settings.RABBITMQ_MAX_RETRIES)
+    # RabbitMQ publication attempts are broker retries, not SMS provider attempts.
+    # Keep them separate from outbox.attempt_count, which counts provider invocations.
+    broker_retry_count = (outbox.broker_retry_count or 0) + 1
+    outbox.broker_retry_count = broker_retry_count
+    final = broker_retry_count >= min(outbox.max_retries or settings.RABBITMQ_MAX_RETRIES, settings.RABBITMQ_MAX_RETRIES)
     if final:
         outbox.status = "dead"
     else:
         outbox.status = "pending"
-        outbox.retry_count = (outbox.retry_count or 0) + 1
-        delay = calculate_retry_delay_seconds(outbox.attempt_count or 1)
+        delay = calculate_retry_delay_seconds(broker_retry_count)
         # SQLite-compatible enough for tests; Postgres publisher normally uses DB now before claim.
         from datetime import timedelta
         outbox.available_at = now + timedelta(seconds=delay)
-    await write_audit(session, None, "communication_broker_publish_failed", entity_type="client_communication_outbox", entity_id=outbox.id, meta={"outbox_id": outbox.id, "event_id": outbox.event_id, "attempt_id": outbox.attempt_id, "worker_id": worker_id, "final": final})
+    await write_audit(session, None, "communication_broker_publish_failed", entity_type="client_communication_outbox", entity_id=outbox.id, meta={"outbox_id": outbox.id, "event_id": outbox.event_id, "attempt_id": outbox.attempt_id, "worker_id": worker_id, "final": final, "broker_retry_count": broker_retry_count})
     return BrokerPublishResult("dead" if final else "retry_scheduled", outbox_id=outbox.id, error=str(error)[:500])
 
 
@@ -193,7 +196,7 @@ async def publish_once(*, worker_id: str, broker=None, session_factory: async_se
     if owns_broker:
         await broker.connect()
     async with session_factory() as session:
-        claimed = await claim_outbox_batch(session, worker_id=worker_id, batch_size=batch_size)
+        claimed = await claim_outbox_batch(session, worker_id=worker_id, batch_size=batch_size, increment_provider_attempt_count=False)
         await session.commit()
     results: list[BrokerPublishResult] = []
     try:
@@ -257,7 +260,10 @@ async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_
         outbox.status = "processing"
         outbox.locked_by = worker_id
         outbox.locked_at = await _db_now(session)
+        # This is the provider-attempt boundary: provider counters change only
+        # when the consumer is about to invoke the provider abstraction.
         outbox.attempt_count = (outbox.attempt_count or 0) + 1
+        outbox.last_attempted_at = outbox.locked_at
         await session.commit()
 
     # Provider payload is intentionally fetched from PostgreSQL, not trusted from RabbitMQ.

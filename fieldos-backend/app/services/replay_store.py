@@ -8,6 +8,7 @@ from app.config import settings
 
 _MEMORY_REPLAY_CACHE: dict[str, datetime] = {}
 MAX_REPLAY_TTL_SECONDS = 24 * 60 * 60
+REPLAY_TTL_SAFETY_MARGIN_SECONDS = 30
 
 
 class ReplayStoreError(RuntimeError):
@@ -28,10 +29,19 @@ def nonce_digest(nonce: str) -> str:
 def replay_ttl_seconds() -> int:
     try:
         ttl = int(settings.N8N_REPLAY_TTL_SECONDS)
+        tolerance = int(settings.N8N_TIMESTAMP_TOLERANCE_SECONDS)
     except (TypeError, ValueError) as exc:
-        raise ReplayStoreError("N8N_REPLAY_TTL_SECONDS must be an integer") from exc
+        raise ReplayStoreError("N8N_REPLAY_TTL_SECONDS and N8N_TIMESTAMP_TOLERANCE_SECONDS must be integers") from exc
     if ttl <= 0:
         raise ReplayStoreError("N8N_REPLAY_TTL_SECONDS must be positive")
+    if tolerance <= 0:
+        raise ReplayStoreError("N8N_TIMESTAMP_TOLERANCE_SECONDS must be positive")
+    required_minimum = tolerance + REPLAY_TTL_SAFETY_MARGIN_SECONDS
+    if ttl < required_minimum:
+        raise ReplayStoreError(
+            "N8N_REPLAY_TTL_SECONDS must be at least "
+            "N8N_TIMESTAMP_TOLERANCE_SECONDS + 30 seconds"
+        )
     if ttl > MAX_REPLAY_TTL_SECONDS:
         raise ReplayStoreError(f"N8N_REPLAY_TTL_SECONDS must be <= {MAX_REPLAY_TTL_SECONDS}")
     return ttl

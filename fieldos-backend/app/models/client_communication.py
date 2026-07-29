@@ -97,6 +97,7 @@ class ClientCommunicationOutbox(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     broker_message_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     broker_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    broker_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

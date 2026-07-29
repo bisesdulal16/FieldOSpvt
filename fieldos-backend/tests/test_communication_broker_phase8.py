@@ -54,6 +54,7 @@ async def test_dispatch_mode_defaults_to_postgres_and_rabbitmq_disabled_no_behav
         outbox = await s.get(ClientCommunicationOutbox, outbox_id)
         attempt = await s.get(ClientCommunicationAttempt, outbox.attempt_id)
     assert outbox.status == "published"
+    assert outbox.attempt_count == 1
     assert attempt.status == "submitted"
 
 
@@ -87,8 +88,14 @@ async def test_rabbitmq_publisher_confirms_before_marking_broker_published(clien
     assert "recipient" not in envelope and "message" not in envelope
     async with AsyncSessionLocal() as s:
         outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+        attempt = await s.get(ClientCommunicationAttempt, outbox.attempt_id)
     assert outbox.status == "broker_published"
     assert outbox.broker_message_id == envelope["message_id"]
+    assert (outbox.attempt_count or 0) == 0
+    assert outbox.last_attempted_at is None
+    assert attempt.status == "queued"
+    assert attempt.submitted_at is None
+    assert attempt.provider_reference is None
 
 
 @pytest.mark.asyncio
@@ -101,7 +108,9 @@ async def test_broker_failure_leaves_postgres_retryable(client, monkeypatch):
     async with AsyncSessionLocal() as s:
         outbox = await s.get(ClientCommunicationOutbox, outbox_id)
     assert outbox.status == "pending"
-    assert outbox.retry_count == 1
+    assert outbox.broker_retry_count == 1
+    assert (outbox.retry_count or 0) == 0
+    assert (outbox.attempt_count or 0) == 0
     assert outbox.broker_message_id is None
 
 
@@ -160,3 +169,97 @@ def test_sms_reminder_routes_only_to_sms_delivery_queue():
 def test_worker_module_imports():
     import app.workers.communication_publisher  # noqa: F401
     import app.workers.communication_consumer  # noqa: F401
+
+
+@pytest.mark.asyncio
+async def test_duplicate_broker_publication_does_not_count_as_provider_attempt(client, monkeypatch):
+    outbox_id = await _seed_authoritative_outbox()
+    monkeypatch.setattr(settings, "COMMUNICATION_DISPATCH_MODE", "rabbitmq")
+    monkeypatch.setattr(settings, "RABBITMQ_ENABLED", True)
+    broker = FakeBroker()
+    first = await publish_once(worker_id="publisher-dupe-a", broker=broker, batch_size=1)
+    second = await publish_once(worker_id="publisher-dupe-b", broker=broker, batch_size=1)
+    assert first[0].status == "broker_published"
+    assert second == []
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+    assert (outbox.attempt_count or 0) == 0
+    assert (outbox.broker_retry_count or 0) == 0
+    assert (outbox.retry_count or 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_consumer_provider_invocation_increments_provider_attempt_once(client, monkeypatch):
+    outbox_id = await _seed_authoritative_outbox(status="broker_published")
+    calls = {"count": 0}
+
+    class Provider:
+        async def dispatch(self, attempt, payload, *, idempotency_key):
+            calls["count"] += 1
+            return DispatchResult("success", provider_reference="once-ref", provider_status="submitted", idempotency_key_used=idempotency_key)
+
+    monkeypatch.setattr("app.services.communication_broker.provider_for", lambda payload: Provider())
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+        envelope = build_message_envelope(outbox, json.loads(outbox.payload_json))
+    result = await process_envelope(envelope, worker_id="consumer-once")
+    assert result.status == "published"
+    assert calls["count"] == 1
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+        attempt = await s.get(ClientCommunicationAttempt, outbox.attempt_id)
+    assert outbox.attempt_count == 1
+    assert (outbox.broker_retry_count or 0) == 0
+    assert attempt.submitted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_final_state_duplicate_delivery_does_not_increment_provider_attempt(client):
+    outbox_id = await _seed_authoritative_outbox(status="broker_published", attempt_status="submitted")
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+        outbox.attempt_count = 1
+        attempt = await s.get(ClientCommunicationAttempt, outbox.attempt_id)
+        attempt.provider_reference = "existing-ref"
+        attempt.submitted_at = datetime.utcnow()
+        await s.commit()
+        envelope = build_message_envelope(outbox, json.loads(outbox.payload_json))
+    result = await process_envelope(envelope, worker_id="consumer-final-dupe")
+    assert result.status == "already_submitted"
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+    assert outbox.attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_broker_and_provider_retry_counters_remain_distinct(client, monkeypatch):
+    outbox_id = await _seed_authoritative_outbox()
+    monkeypatch.setattr(settings, "COMMUNICATION_DISPATCH_MODE", "rabbitmq")
+    monkeypatch.setattr(settings, "RABBITMQ_ENABLED", True)
+    await publish_once(worker_id="publisher-broker-fail", broker=FakeBroker(fail=True), batch_size=1)
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+        outbox.available_at = None
+        await s.commit()
+    assert outbox.broker_retry_count == 1
+    assert outbox.retry_count == 0
+    assert outbox.attempt_count == 0
+
+    ok_results = await publish_once(worker_id="publisher-broker-ok", broker=FakeBroker(), batch_size=1)
+    assert ok_results[0].status == "broker_published"
+
+    class RetryProvider:
+        async def dispatch(self, attempt, payload, *, idempotency_key):
+            return DispatchResult("retryable_failure", safe_error_message="temporary provider failure", error_code="provider_temp")
+
+    monkeypatch.setattr("app.services.communication_broker.provider_for", lambda payload: RetryProvider())
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+        envelope = build_message_envelope(outbox, json.loads(outbox.payload_json))
+    result = await process_envelope(envelope, worker_id="consumer-provider-retry")
+    assert result.status == "retry_scheduled"
+    async with AsyncSessionLocal() as s:
+        outbox = await s.get(ClientCommunicationOutbox, outbox_id)
+    assert outbox.broker_retry_count == 1
+    assert outbox.retry_count == 1
+    assert outbox.attempt_count == 1

@@ -1,6 +1,5 @@
 {
   "vhosts": [{"name": "/fieldos"}],
-  "permissions": [{"user": "fieldos", "vhost": "/fieldos", "configure": "^fieldos\\.communication.*", "write": "^fieldos\\.communication.*", "read": "^fieldos\\.communication.*"}],
   "exchanges": [
     {"name": "fieldos.communication", "vhost": "/fieldos", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
     {"name": "fieldos.communication.dlx", "vhost": "/fieldos", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {}}

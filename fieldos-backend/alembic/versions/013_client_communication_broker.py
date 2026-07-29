@@ -17,10 +17,12 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("client_communication_outbox", sa.Column("broker_message_id", sa.String(length=160), nullable=True))
     op.add_column("client_communication_outbox", sa.Column("broker_published_at", sa.DateTime(), nullable=True))
+    op.add_column("client_communication_outbox", sa.Column("broker_retry_count", sa.Integer(), nullable=False, server_default="0"))
     op.create_index("ix_client_communication_outbox_broker_message_id", "client_communication_outbox", ["broker_message_id"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_client_communication_outbox_broker_message_id", table_name="client_communication_outbox")
+    op.drop_column("client_communication_outbox", "broker_retry_count")
     op.drop_column("client_communication_outbox", "broker_published_at")
     op.drop_column("client_communication_outbox", "broker_message_id")

@@ -123,9 +123,11 @@ Behavior:
 2. Builds a non-PII versioned envelope.
 3. Publishes a persistent message to RabbitMQ with publisher confirms.
 4. If RabbitMQ confirms publication, marks `client_communication_outbox.status='broker_published'`.
-5. Stores `broker_message_id` and `broker_published_at` in PostgreSQL.
-6. On broker failure/interruption before confirm, releases the row back to retryable PostgreSQL state or marks dead after bounded retries.
-7. Never calls SMS provider directly.
+5. Stores `broker_message_id`, `broker_published_at`, and broker retry metadata in PostgreSQL.
+6. On broker failure/interruption before confirm, increments `broker_retry_count`, releases the row back to retryable PostgreSQL state, or marks dead after bounded broker retries.
+7. Never calls SMS provider directly and never increments provider attempt counters.
+
+RabbitMQ publication attempt != SMS provider attempt. `broker_retry_count` tracks broker publication failures. `attempt_count` / `retry_count` track provider invocation and provider retry behavior only.
 
 Crash window: if RabbitMQ confirms publication and the publisher crashes before PostgreSQL records `broker_published_at`, recovery may republish the same outbox row. This is intentional at-least-once broker delivery. The consumer remains safe through the stable FieldOS idempotency key, authoritative attempt-state lookup, row locking, final-state protection, and provider dispatch guard. Do not claim exactly-once delivery.
 
@@ -162,7 +164,7 @@ Phase 7's process-local n8n nonce cache is replaced with a pluggable replay stor
 ```env
 N8N_REPLAY_STORE=memory
 REDIS_URL=
-N8N_REPLAY_TTL_SECONDS=300
+N8N_REPLAY_TTL_SECONDS=330
 ```
 
 Redis mode uses atomic `SET key 1 NX EX <ttl>` and fails closed if Redis is configured but unavailable. TTL is validated as a positive bounded integer.

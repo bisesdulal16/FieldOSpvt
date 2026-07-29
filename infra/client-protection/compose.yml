@@ -15,6 +15,7 @@ services:
       RABBITMQ_DEFAULT_VHOST: ${FIELDOS_RABBITMQ_VHOST:-/fieldos}
     volumes:
       - ${FIELDOS_CLIENT_PROTECTION_DATA_DIR:-/mnt/hdd-internal/fieldos-client-protection}/rabbitmq:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
       - ./rabbitmq/definitions.example.json:/etc/rabbitmq/definitions.json:ro
     ports:
@@ -28,7 +29,7 @@ services:
       timeout: 5s
       retries: 12
     networks:
-      - fieldos_client_protection
+      - fieldos-client-protection
     restart: unless-stopped
 
   redis:
@@ -48,7 +49,8 @@ services:
     environment:
       FIELDOS_REDIS_PASSWORD: ${FIELDOS_REDIS_PASSWORD:?set FIELDOS_REDIS_PASSWORD}
     networks:
-      - fieldos_client_protection
+      - fieldos-client-protection
+      - fieldos-app
     restart: unless-stopped
 
   outbox-publisher:
@@ -63,19 +65,24 @@ services:
       COMMUNICATION_DISPATCH_MODE: rabbitmq
       COMMUNICATION_WORKER_ENABLED: "true"
       RABBITMQ_ENABLED: "true"
-      RABBITMQ_URL: amqp://${FIELDOS_RABBITMQ_USER:-fieldos}:${FIELDOS_RABBITMQ_PASSWORD}@rabbitmq:5672/${FIELDOS_RABBITMQ_VHOST_ENCODED:-%2Ffieldos}
+      RABBITMQ_URL: amqp://${FIELDOS_RABBITMQ_USER:-fieldos}:${FIELDOS_RABBITMQ_PASSWORD:?set FIELDOS_RABBITMQ_PASSWORD}@rabbitmq:5672/${FIELDOS_RABBITMQ_VHOST_ENCODED:-%2Ffieldos}
       RABBITMQ_VHOST: ${FIELDOS_RABBITMQ_VHOST:-/fieldos}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-fieldos.communication}
       RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-20}
       RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS: ${RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS:-10}
       RABBITMQ_RECONNECT_SECONDS: ${RABBITMQ_RECONNECT_SECONDS:-5}
       RABBITMQ_MAX_RETRIES: ${RABBITMQ_MAX_RETRIES:-5}
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      REDIS_URL: ${REDIS_URL:-redis://:${FIELDOS_REDIS_PASSWORD:?set FIELDOS_REDIS_PASSWORD}@redis:6379/0}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-fieldos}
+      N8N_REPLAY_STORE: ${N8N_REPLAY_STORE:-memory}
+      N8N_REPLAY_TTL_SECONDS: ${N8N_REPLAY_TTL_SECONDS:-330}
     depends_on:
       rabbitmq:
         condition: service_healthy
     networks:
-      - fieldos_client_protection
-      - fieldos_app
+      - fieldos-client-protection
+      - fieldos-app
     restart: unless-stopped
 
   sms-consumer:
@@ -91,20 +98,25 @@ services:
       SMS_API_TOKEN: ${SMS_API_TOKEN:-}
       COMMUNICATION_DISPATCH_MODE: rabbitmq
       RABBITMQ_ENABLED: "true"
-      RABBITMQ_URL: amqp://${FIELDOS_RABBITMQ_USER:-fieldos}:${FIELDOS_RABBITMQ_PASSWORD}@rabbitmq:5672/${FIELDOS_RABBITMQ_VHOST_ENCODED:-%2Ffieldos}
+      RABBITMQ_URL: amqp://${FIELDOS_RABBITMQ_USER:-fieldos}:${FIELDOS_RABBITMQ_PASSWORD:?set FIELDOS_RABBITMQ_PASSWORD}@rabbitmq:5672/${FIELDOS_RABBITMQ_VHOST_ENCODED:-%2Ffieldos}
       RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-20}
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      REDIS_URL: ${REDIS_URL:-redis://:${FIELDOS_REDIS_PASSWORD:?set FIELDOS_REDIS_PASSWORD}@redis:6379/0}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-fieldos}
+      N8N_REPLAY_STORE: ${N8N_REPLAY_STORE:-memory}
+      N8N_REPLAY_TTL_SECONDS: ${N8N_REPLAY_TTL_SECONDS:-330}
     depends_on:
       rabbitmq:
         condition: service_healthy
     networks:
-      - fieldos_client_protection
-      - fieldos_app
+      - fieldos-client-protection
+      - fieldos-app
     restart: unless-stopped
 
 networks:
-  fieldos_client_protection:
-    name: fieldos_client_protection
+  fieldos-client-protection:
+    name: ${FIELDOS_CLIENT_PROTECTION_NETWORK:-fieldos_client_protection}
     internal: true
-  fieldos_app:
-    name: fieldospvt_default
+  fieldos-app:
+    name: ${FIELDOS_APP_NETWORK:-fieldospvt_default}
     external: true

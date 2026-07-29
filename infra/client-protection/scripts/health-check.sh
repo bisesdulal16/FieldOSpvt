@@ -14,3 +14,14 @@ if $COMPOSE exec -T redis redis-cli -a "${FIELDOS_REDIS_PASSWORD:-}" ping 2>/dev
 else
   echo "redis: not reachable"
 fi
+if $COMPOSE run --rm --no-deps outbox-publisher python - <<'PY' >/dev/null 2>&1
+import socket
+for host, port in [('rabbitmq', 5672), ('redis', 6379)]:
+    s = socket.create_connection((host, port), timeout=5)
+    s.close()
+PY
+then
+  echo "worker-network: rabbitmq and redis reachable"
+else
+  echo "worker-network: reachability check skipped or failed"
+fi

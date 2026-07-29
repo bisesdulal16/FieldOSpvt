@@ -138,7 +138,7 @@ class Settings:
     N8N_PROVIDER_FAILURE_THRESHOLD: int = int(os.getenv("N8N_PROVIDER_FAILURE_THRESHOLD", "10"))
     N8N_BACKLOG_AGE_THRESHOLD_SECONDS: int = int(os.getenv("N8N_BACKLOG_AGE_THRESHOLD_SECONDS", "900"))
     N8N_REPLAY_STORE: str = os.getenv("N8N_REPLAY_STORE", "memory").strip().lower()
-    N8N_REPLAY_TTL_SECONDS: int = int(os.getenv("N8N_REPLAY_TTL_SECONDS", "300"))
+    N8N_REPLAY_TTL_SECONDS: int = int(os.getenv("N8N_REPLAY_TTL_SECONDS", "330"))
 
     # ── Error monitoring (Sentry) ─────────────────────────────────────────
     # Set SENTRY_DSN in production to capture exceptions. Unset = disabled (no-op).
