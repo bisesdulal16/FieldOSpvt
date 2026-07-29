@@ -50,6 +50,7 @@ from app.routers import (
     announcements,
     feedback,
     communication_outbox,
+    communication_callbacks,
 )
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ app.include_router(security.router, prefix=settings.API_V1_PREFIX, tags=["Securi
 app.include_router(pilot.router, prefix=settings.API_V1_PREFIX, tags=["Pilot Management"])
 app.include_router(feedback.router, prefix=settings.API_V1_PREFIX, tags=["Feedback"])
 app.include_router(communication_outbox.router, prefix=settings.API_V1_PREFIX, tags=["Client Communication Outbox"])
+app.include_router(communication_callbacks.router, prefix=settings.API_V1_PREFIX, tags=["Client Communication Callbacks"])
 
 # Announcements: two routers — manager (POST) + mobile (GET)
 app.include_router(announcements.manager_router, prefix=settings.API_V1_PREFIX, tags=["Announcements"])

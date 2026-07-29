@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -22,9 +22,6 @@ class ClientCommunicationEvent(Base):
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
     officer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
 
-    # Extensible purpose. Supported values include:
-    # collection_verification, payment_due_reminder, payment_overdue_reminder,
-    # promise_to_pay_reminder, dispute_acknowledgement, client_protection_alert.
     purpose: Mapped[str] = mapped_column(String(50), nullable=False, default="collection_verification", index=True)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False, default="collection_verification", index=True)
     verification_type: Mapped[str | None] = mapped_column(String(30), nullable=True, default="receipt")
@@ -32,7 +29,6 @@ class ClientCommunicationEvent(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True, index=True)
 
-    # Scheduling/cancellation fields. Immediate events have scheduled_for NULL.
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -55,7 +51,7 @@ class ClientCommunicationAttempt(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("client_communication_events.id"), nullable=False, index=True)
-    channel: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # sms|ivr|ai_call|manual
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(40), nullable=False, default="log", index=True)
     provider_reference: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     recipient: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -71,6 +67,11 @@ class ClientCommunicationAttempt(Base):
 
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_event_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    provider_status_raw: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    callback_received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivery_failed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    callback_payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     client_response: Mapped[str | None] = mapped_column(String(40), nullable=True)
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -79,11 +80,7 @@ class ClientCommunicationAttempt(Base):
 
 
 class ClientCommunicationOutbox(Base):
-    """Transactional outbox row created with the official ledger event.
-
-    Workers will publish these rows to RabbitMQ later. Phase 1 only creates the
-    durable row; no external queue is required for collection commits to succeed.
-    """
+    """Transactional outbox row created with the official ledger event."""
 
     __tablename__ = "client_communication_outbox"
 
@@ -126,3 +123,26 @@ class ClientCommunicationWorkerHeartbeat(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ClientCommunicationCallbackReceipt(Base):
+    """Authenticated provider callback receipt for idempotency and replay protection."""
+
+    __tablename__ = "client_communication_callback_receipts"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_event_id", name="uq_client_comm_callback_provider_event"),
+        UniqueConstraint("signature_digest", name="uq_client_comm_callback_signature_digest"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider_event_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    provider_reference: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    attempt_id: Mapped[int | None] = mapped_column(ForeignKey("client_communication_attempts.id"), nullable=True, index=True)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("client_communication_events.id"), nullable=True, index=True)
+    normalized_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider_status_raw: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    signature_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    callback_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    action_taken: Mapped[str] = mapped_column(String(40), nullable=False, default="received")
