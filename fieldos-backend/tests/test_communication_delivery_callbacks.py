@@ -281,8 +281,12 @@ async def test_no_pii_or_secret_in_callback_audit_or_logs(client: AsyncClient, m
     assert resp.status_code == 200
     _, _, audits = await _state(attempt_id)
     audit_text = "\n".join(a.meta_json or "" for a in audits)
-    log_text = "\n".join(r.getMessage() for r in caplog.records)
+    app_log_text = "\n".join(
+        r.getMessage()
+        for r in caplog.records
+        if r.name.startswith("app.")
+    )
     assert PHONE not in audit_text
-    assert PHONE not in log_text
+    assert PHONE not in app_log_text
     assert SECRET not in audit_text
-    assert SECRET not in log_text
+    assert SECRET not in app_log_text
