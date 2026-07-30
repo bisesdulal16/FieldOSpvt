@@ -133,27 +133,41 @@ Crash window: if RabbitMQ confirms publication and the publisher crashes before 
 
 ## Consumer behavior
 
-Command:
+Commands:
 
 ```bash
+# Continuous mode: visible RabbitMQ subscription consumer.
 python -m app.workers.communication_consumer --queue sms
+
+# One-shot/bounded mode: single queue.get poll for canaries and smoke tests.
+python -m app.workers.communication_consumer --queue sms --once
 ```
 
-Behavior:
+Continuous mode uses a registered RabbitMQ subscription (`queue.consume(...)`) with manual acknowledgements and a sanitized consumer tag:
 
-1. Receives a message using manual acknowledgements.
-2. Validates JSON, schema version, required fields, allowed channel, and PII-free envelope constraints.
-3. Loads authoritative outbox, attempt, and event rows from PostgreSQL.
-4. Locks the outbox row before deciding dispatch eligibility.
-5. Verifies idempotency key and row IDs match.
-6. Refuses final-state/cancelled/non-dispatchable attempts without provider invocation.
-7. Marks the outbox `processing` and commits that claim before provider work.
-8. Calls the existing provider abstraction using PostgreSQL-fetched recipient/message/provider data.
-9. Persists provider result and communication state through the existing outbox result path.
-10. Commits PostgreSQL.
-11. Acknowledges the RabbitMQ message only after the database commit returns successfully.
+```text
+fieldos-sms-consumer:<worker_id>
+```
+
+This makes operations visible in RabbitMQ: the `fieldos.communication.sms` queue should report exactly one active consumer when one continuous SMS worker is running. One-shot mode intentionally remains bounded and may use `queue.get(...)`; it exits after processing at most one message or after a bounded empty poll. The worker applies `RABBITMQ_PREFETCH` as the maximum concurrent in-flight callback count per worker, with an effective minimum of `1` so RabbitMQ `prefetch=0` never creates an unlimited callback set.
+
+Per-message behavior is shared by both modes:
+
+1. Receive a message without automatic ACK (`no_ack=false`).
+2. Validate JSON, schema version, required fields, allowed channel, and PII-free envelope constraints.
+3. Load authoritative outbox, attempt, and event rows from PostgreSQL.
+4. Lock the outbox row before deciding dispatch eligibility.
+5. Verify idempotency key and row IDs match.
+6. Refuse final-state/cancelled/non-dispatchable attempts without provider invocation.
+7. Mark the outbox `processing` and commit that claim before provider work.
+8. Call the existing provider abstraction using PostgreSQL-fetched recipient/message/provider data.
+9. Persist provider result and communication state through the existing outbox result path.
+10. Commit PostgreSQL.
+11. ACK the RabbitMQ message only after the database commit returns successfully.
 
 Database failure before result commit causes RabbitMQ `nack(requeue=True)` or bounded retry through PostgreSQL recovery. Malformed/non-retryable envelopes are rejected to DLQ. Final-state attempts are acknowledged without provider invocation. Logs/audits must not include full phone numbers, SMS bodies, provider tokens, or financial payloads.
+
+Continuous shutdown handles SIGTERM/SIGINT by cancelling the RabbitMQ subscription, waiting a bounded period for in-flight processing to finish, ACKing only committed work, nacking/requeueing uncommitted work, then closing the channel/connection and exiting normally. Transient RabbitMQ connection loss triggers bounded-delay reconnect using `RABBITMQ_RECONNECT_SECONDS`; permanent configuration errors are surfaced instead of hidden in a tight infinite loop.
 
 Provider edge: if a provider accepts a message and the consumer crashes before saving the provider result, RabbitMQ can redeliver and FieldOS may need to retry/reconcile. Future providers should receive the FieldOS idempotency key where supported so provider-side duplicate suppression can participate in recovery.
 

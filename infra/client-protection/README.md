@@ -62,6 +62,30 @@ Start workers only after separate approval:
 docker compose -f infra/client-protection/compose.yml --profile workers up -d outbox-publisher sms-consumer
 ```
 
+## Worker operating modes
+
+`outbox-publisher` can run continuously or with `--once` for bounded canaries. It publishes non-PII PostgreSQL outbox envelopes to RabbitMQ and records broker metadata only after publisher confirm.
+
+`sms-consumer` supports two modes:
+
+```bash
+# Continuous mode: registered RabbitMQ subscription consumer visible in queue metrics.
+python -m app.workers.communication_consumer --queue sms
+
+# One-shot/bounded mode: queue.get(...) poll, processes at most one message.
+python -m app.workers.communication_consumer --queue sms --once
+```
+
+Continuous mode registers a manual-ACK RabbitMQ consumer with tag:
+
+```text
+fieldos-sms-consumer:<worker_id>
+```
+
+Operational expectation: one running `sms-consumer` container should make `rabbitmqctl list_queues name messages consumers` report `fieldos.communication.sms ... consumers=1`. Reminder, IVR, escalation, and all DLQ queues should remain at `consumers=0` unless separately approved.
+
+ACK ordering is database-first: the consumer validates the non-PII envelope, loads and locks PostgreSQL authoritative event/attempt/outbox rows, invokes the configured provider only when eligible, persists and commits the provider result, then ACKs RabbitMQ. Malformed envelopes are rejected to DLQ. Database or provider processing failures NACK/requeue according to the existing bounded retry paths. Callback concurrency is bounded by `RABBITMQ_PREFETCH` per worker, using an effective minimum of `1` to avoid RabbitMQ's unlimited `prefetch=0` behavior; duplicate deliveries are still guarded by authoritative row locks and final-state checks. Graceful SIGTERM/SIGINT cancels the subscription, lets in-flight committed work finish within a bounded timeout, requeues uncommitted work, closes RabbitMQ cleanly, and exits normally. Transient RabbitMQ connection loss reconnects after `RABBITMQ_RECONNECT_SECONDS`; permanent configuration errors are surfaced.
+
 ## Environment variables
 
 Safe defaults:
