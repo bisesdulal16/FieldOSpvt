@@ -399,7 +399,7 @@ async def test_no_sensitive_values_in_app_logs(caplog):
 def test_one_shot_scheduler_exits_cleanly(monkeypatch: pytest.MonkeyPatch):
     env = os.environ.copy()
     env["DB_TYPE"] = "sqlite"
-    env["SQLITE_PATH"] = "/tmp/fieldos_test.db"
+    env["SQLITE_PATH"] = os.environ["SQLITE_PATH"]
     env["REMINDERS_ENABLED"] = "false"
     result = subprocess.run([sys.executable, "-m", "app.workers.communication_reminders", "--once"], cwd=os.path.dirname(os.path.dirname(__file__)), env=env, text=True, capture_output=True, timeout=60)
     assert result.returncode == 0, result.stderr

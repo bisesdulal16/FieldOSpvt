@@ -6,6 +6,7 @@ import logging
 import signal
 import uuid
 from dataclasses import dataclass
+from enum import Enum
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +18,7 @@ from app.database import AsyncSessionLocal
 from app.models.client_communication import ClientCommunicationAttempt, ClientCommunicationEvent, ClientCommunicationOutbox
 from app.services.communication_outbox_service import (
     DISPATCH_BLOCKING_STATUSES,
+    TERMINAL_OUTBOX_STATUSES,
     ProcessResult,
     _db_now,
     calculate_retry_delay_seconds,
@@ -35,7 +37,81 @@ DECLARED_ROUTING_KEYS = {
     "escalation": "communication.escalation",
     "reminder": "communication.reminder",
 }
+RETRY_HEADER = "x-fieldos-consumer-retry-count"
+ORIGINAL_ROUTING_HEADER = "x-fieldos-original-routing-key"
+RETRY_REASON_HEADER = "x-fieldos-retry-reason"
 FINAL_OUTBOX_STATUSES = {"published", "dead", "cancelled", "skipped"}
+DISPATCHABLE_BROKER_OUTBOX_STATUSES = {"broker_published"}
+TEMPORARY_BROKER_OUTBOX_STATUSES = {"pending", "processing", "retryable"}
+FINAL_EVENT_STATUSES = {"cancelled", "confirmed", "disputed", "failed"}
+
+
+class ConsumerOutcome(str, Enum):
+    PROVIDER_SUBMITTED = "provider_submitted"
+    PROVIDER_RETRY_SCHEDULED = "provider_retry_scheduled"
+    FINAL_STATE_DUPLICATE = "final_state_duplicate"
+    RETRYABLE_CONFLICT = "retryable_conflict"
+    MALFORMED_ENVELOPE = "malformed_envelope"
+    PERMANENT_INVALID = "permanent_invalid"
+    NOT_FOUND = "not_found"
+    IDEMPOTENCY_MISMATCH = "idempotency_mismatch"
+    UNEXPECTED_STATE = "unexpected_state"
+
+
+class BrokerAction(str, Enum):
+    ACK = "ack"
+    DELAYED_RETRY = "delayed_retry"
+    REJECT_DLQ = "reject_dlq"
+
+
+@dataclass(slots=True)
+class ConsumerProcessResult:
+    outcome: ConsumerOutcome
+    broker_action: BrokerAction
+    outbox_id: int | None = None
+    provider_called: bool = False
+    committed: bool = False
+    reason_code: str | None = None
+    error: str | None = None
+
+    @property
+    def status(self) -> str:
+        return self.reason_code or self.outcome.value
+
+
+def _consumer_result(
+    outcome: ConsumerOutcome,
+    broker_action: BrokerAction,
+    *,
+    outbox_id: int | None = None,
+    provider_called: bool = False,
+    committed: bool = False,
+    reason_code: str | None = None,
+    error: str | None = None,
+) -> ConsumerProcessResult:
+    return ConsumerProcessResult(
+        outcome=outcome,
+        broker_action=broker_action,
+        outbox_id=outbox_id,
+        provider_called=provider_called,
+        committed=committed,
+        reason_code=reason_code or outcome.value,
+        error=error,
+    )
+
+
+def _map_dispatch_persist_result(result: ProcessResult) -> ConsumerProcessResult:
+    if result.status == "published":
+        return _consumer_result(ConsumerOutcome.PROVIDER_SUBMITTED, BrokerAction.ACK, outbox_id=result.outbox_id, provider_called=True, committed=True, reason_code=result.status)
+    if result.status == "already_submitted":
+        return _consumer_result(ConsumerOutcome.FINAL_STATE_DUPLICATE, BrokerAction.ACK, outbox_id=result.outbox_id, provider_called=result.provider_called, committed=True, reason_code=result.status)
+    if result.status == "retry_scheduled":
+        return _consumer_result(ConsumerOutcome.PROVIDER_RETRY_SCHEDULED, BrokerAction.ACK, outbox_id=result.outbox_id, provider_called=True, committed=True, reason_code=result.status, error=result.error)
+    if result.status == "dead":
+        return _consumer_result(ConsumerOutcome.PERMANENT_INVALID, BrokerAction.REJECT_DLQ, outbox_id=result.outbox_id, provider_called=True, committed=True, reason_code=result.status, error=result.error)
+    if result.status == "lock_lost":
+        return _consumer_result(ConsumerOutcome.RETRYABLE_CONFLICT, BrokerAction.DELAYED_RETRY, outbox_id=result.outbox_id, provider_called=True, committed=False, reason_code=result.status, error=result.error)
+    return _consumer_result(ConsumerOutcome.UNEXPECTED_STATE, BrokerAction.DELAYED_RETRY, outbox_id=result.outbox_id, provider_called=result.provider_called, committed=False, reason_code=result.status, error=result.error)
 
 
 @dataclass(slots=True)
@@ -56,6 +132,23 @@ def routing_key_for(outbox: ClientCommunicationOutbox, payload: dict[str, Any]) 
     if channel == "reminder":
         return ACTIVE_ROUTING_KEYS["reminder"]
     return DECLARED_ROUTING_KEYS.get(channel, f"communication.{channel}")
+
+
+def queue_key_for_routing_key(routing_key: str) -> str:
+    for queue_key, declared_routing_key in DECLARED_ROUTING_KEYS.items():
+        if routing_key == declared_routing_key:
+            return queue_key
+    if routing_key.startswith("communication."):
+        return routing_key.split(".", 1)[1]
+    return "sms"
+
+
+def retry_routing_key_for(routing_key: str) -> str:
+    return f"{routing_key}.retry"
+
+
+def dead_routing_key_for(routing_key: str) -> str:
+    return f"{routing_key}.dead"
 
 
 def build_message_envelope(outbox: ClientCommunicationOutbox, payload: dict[str, Any], *, message_id: str | None = None) -> dict[str, Any]:
@@ -100,6 +193,7 @@ class RabbitMQClient:
         self.connection = None
         self.channel = None
         self.exchange = None
+        self.dlx = None
 
     async def __aenter__(self):
         await self.connect()
@@ -116,16 +210,27 @@ class RabbitMQClient:
         self.channel = await self.connection.channel(publisher_confirms=True)
         await self.channel.set_qos(prefetch_count=settings.RABBITMQ_PREFETCH)
         self.exchange = await self.channel.declare_exchange(settings.RABBITMQ_EXCHANGE, aio_pika.ExchangeType.TOPIC, durable=True)
-        dlx = await self.channel.declare_exchange(f"{settings.RABBITMQ_EXCHANGE}.dlx", aio_pika.ExchangeType.TOPIC, durable=True)
+        self.dlx = await self.channel.declare_exchange(f"{settings.RABBITMQ_EXCHANGE}.dlx", aio_pika.ExchangeType.TOPIC, durable=True)
         for purpose, routing_key in DECLARED_ROUTING_KEYS.items():
+            queue_name = f"fieldos.communication.{purpose}"
             queue = await self.channel.declare_queue(
-                f"fieldos.communication.{purpose}",
+                queue_name,
                 durable=True,
-                arguments={"x-dead-letter-exchange": f"{settings.RABBITMQ_EXCHANGE}.dlx", "x-dead-letter-routing-key": f"{routing_key}.dead"},
+                arguments={"x-dead-letter-exchange": f"{settings.RABBITMQ_EXCHANGE}.dlx", "x-dead-letter-routing-key": dead_routing_key_for(routing_key)},
             )
             await queue.bind(self.exchange, routing_key)
-            dead = await self.channel.declare_queue(f"fieldos.communication.{purpose}.dead", durable=True)
-            await dead.bind(dlx, f"{routing_key}.dead")
+            retry = await self.channel.declare_queue(
+                f"{queue_name}.retry",
+                durable=True,
+                arguments={
+                    "x-message-ttl": int(settings.COMMUNICATION_CONSUMER_RETRY_DELAY_MS),
+                    "x-dead-letter-exchange": settings.RABBITMQ_EXCHANGE,
+                    "x-dead-letter-routing-key": routing_key,
+                },
+            )
+            await retry.bind(self.exchange, retry_routing_key_for(routing_key))
+            dead = await self.channel.declare_queue(f"{queue_name}.dead", durable=True)
+            await dead.bind(self.dlx, dead_routing_key_for(routing_key))
         return self
 
     async def publish(self, envelope: dict[str, Any], routing_key: str) -> str:
@@ -140,6 +245,43 @@ class RabbitMQClient:
         )
         await asyncio.wait_for(self.exchange.publish(msg, routing_key=routing_key, mandatory=True), timeout=settings.RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS)
         return envelope["message_id"]
+
+    async def publish_retry(self, envelope: dict[str, Any], *, routing_key: str, retry_count: int, reason_code: str | None = None) -> None:
+        import aio_pika
+        safe_headers = {
+            "schema_version": 1,
+            RETRY_HEADER: int(retry_count),
+            ORIGINAL_ROUTING_HEADER: routing_key,
+        }
+        if reason_code:
+            safe_headers[RETRY_REASON_HEADER] = str(reason_code)[:120]
+        msg = aio_pika.Message(
+            body=json.dumps(validate_envelope(envelope), separators=(",", ":")).encode("utf-8"),
+            message_id=envelope["message_id"],
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+            content_type="application/json",
+            headers=safe_headers,
+            expiration=int(settings.COMMUNICATION_CONSUMER_RETRY_DELAY_MS),
+        )
+        await asyncio.wait_for(self.exchange.publish(msg, routing_key=retry_routing_key_for(routing_key), mandatory=True), timeout=settings.RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS)
+
+    async def publish_dead_letter(self, envelope: dict[str, Any], *, routing_key: str, retry_count: int, reason_code: str | None = None) -> None:
+        import aio_pika
+        safe_headers = {
+            "schema_version": 1,
+            RETRY_HEADER: int(retry_count),
+            ORIGINAL_ROUTING_HEADER: routing_key,
+        }
+        if reason_code:
+            safe_headers[RETRY_REASON_HEADER] = str(reason_code)[:120]
+        msg = aio_pika.Message(
+            body=json.dumps(validate_envelope(envelope), separators=(",", ":")).encode("utf-8"),
+            message_id=envelope["message_id"],
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+            content_type="application/json",
+            headers=safe_headers,
+        )
+        await asyncio.wait_for(self.dlx.publish(msg, routing_key=dead_routing_key_for(routing_key), mandatory=True), timeout=settings.RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS)
 
     async def close(self):
         if self.connection:
@@ -225,7 +367,7 @@ async def publish_once(*, worker_id: str, broker=None, session_factory: async_se
     return results
 
 
-async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_factory: async_sessionmaker[AsyncSession] = AsyncSessionLocal) -> ProcessResult:
+async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_factory: async_sessionmaker[AsyncSession] = AsyncSessionLocal) -> ConsumerProcessResult:
     envelope = validate_envelope(envelope)
     outbox_id = int(envelope["outbox_id"])
     async with session_factory() as session:
@@ -240,23 +382,29 @@ async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_
         ).first()
         if row is None:
             await session.commit()
-            return ProcessResult(status="missing_authoritative_row", outbox_id=outbox_id, error="authoritative outbox row not found")
+            return _consumer_result(ConsumerOutcome.NOT_FOUND, BrokerAction.DELAYED_RETRY, outbox_id=outbox_id, committed=True, reason_code="missing_authoritative_row", error="authoritative outbox row not found")
         outbox, attempt, event = row
         if outbox.idempotency_key != envelope["idempotency_key"] or attempt.id != int(envelope["attempt_id"]) or event.id != int(envelope["event_id"]):
             await session.commit()
-            return ProcessResult(status="idempotency_mismatch", outbox_id=outbox_id, error="broker envelope does not match authoritative row")
+            return _consumer_result(ConsumerOutcome.IDEMPOTENCY_MISMATCH, BrokerAction.REJECT_DLQ, outbox_id=outbox_id, committed=True, reason_code="idempotency_mismatch", error="broker envelope does not match authoritative row")
         if outbox.status == "published" or attempt.status in DISPATCH_BLOCKING_STATUSES or attempt.provider_reference or attempt.submitted_at:
             await session.commit()
-            return ProcessResult(status="already_submitted", outbox_id=outbox_id)
-        if outbox.status == "processing":
+            return _consumer_result(ConsumerOutcome.FINAL_STATE_DUPLICATE, BrokerAction.ACK, outbox_id=outbox_id, committed=True, reason_code="already_submitted")
+        if outbox.status in TERMINAL_OUTBOX_STATUSES or event.status in FINAL_EVENT_STATUSES:
             await session.commit()
-            return ProcessResult(status="already_processing", outbox_id=outbox_id)
-        if outbox.status not in {"broker_published"}:
+            return _consumer_result(ConsumerOutcome.FINAL_STATE_DUPLICATE, BrokerAction.ACK, outbox_id=outbox_id, committed=True, reason_code="final_state_duplicate")
+        if outbox.status in TEMPORARY_BROKER_OUTBOX_STATUSES:
+            # Publisher/consumer race window: RabbitMQ delivery can occur while
+            # PostgreSQL still shows publisher-owned processing/pending state.
+            # Requeue so the message is redelivered after broker_published commits.
             await session.commit()
-            return ProcessResult(status="not_dispatchable", outbox_id=outbox_id)
-        if outbox.status in {"dead", "cancelled", "skipped"} or event.status in {"cancelled", "confirmed", "disputed"}:
+            return _consumer_result(ConsumerOutcome.RETRYABLE_CONFLICT, BrokerAction.DELAYED_RETRY, outbox_id=outbox_id, committed=True, reason_code=f"state_conflict:{outbox.status}")
+        if outbox.status not in DISPATCHABLE_BROKER_OUTBOX_STATUSES:
             await session.commit()
-            return ProcessResult(status="not_dispatchable", outbox_id=outbox_id)
+            return _consumer_result(ConsumerOutcome.UNEXPECTED_STATE, BrokerAction.DELAYED_RETRY, outbox_id=outbox_id, committed=True, reason_code=f"unexpected_state:{outbox.status}")
+        if event.status != "queued" or attempt.status != "queued":
+            await session.commit()
+            return _consumer_result(ConsumerOutcome.UNEXPECTED_STATE, BrokerAction.DELAYED_RETRY, outbox_id=outbox_id, committed=True, reason_code=f"unexpected_state:event={event.status}:attempt={attempt.status}")
         outbox.status = "processing"
         outbox.locked_by = worker_id
         outbox.locked_at = await _db_now(session)
@@ -270,7 +418,7 @@ async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_
     async with session_factory() as session:
         attempt = await session.get(ClientCommunicationAttempt, int(envelope["attempt_id"]))
         payload = json.loads(attempt.metadata_json or "{}") if attempt else {}
-        payload.update({"event_id": envelope["event_id"], "attempt_id": envelope["attempt_id"], "channel": envelope["channel"], "provider": attempt.provider if attempt else "log", "recipient": attempt.recipient if attempt else None})
+        payload.update({"event_id": envelope["event_id"], "attempt_id": envelope["attempt_id"], "channel": envelope["channel"], "purpose": envelope["purpose"], "provider": attempt.provider if attempt else "log", "recipient": attempt.recipient if attempt else None})
         await session.commit()
     provider = provider_for(payload)
     result = await provider.dispatch(attempt=attempt, payload=payload, idempotency_key=envelope["idempotency_key"])
@@ -278,7 +426,7 @@ async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_
         process_result = await persist_dispatch_result(session, outbox_id=outbox_id, worker_id=worker_id, result=result)
         await session.commit()
         process_result.provider_called = True
-        return process_result
+        return _map_dispatch_persist_result(process_result)
 
 
 async def broker_health() -> dict[str, Any]:

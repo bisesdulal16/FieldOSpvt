@@ -94,6 +94,9 @@ class Settings:
     RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS: int = int(os.getenv("RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_SECONDS", "10"))
     RABBITMQ_RECONNECT_SECONDS: int = int(os.getenv("RABBITMQ_RECONNECT_SECONDS", "5"))
     RABBITMQ_MAX_RETRIES: int = int(os.getenv("RABBITMQ_MAX_RETRIES", "5"))
+    COMMUNICATION_CONSUMER_MAX_RETRIES: int = int(os.getenv("COMMUNICATION_CONSUMER_MAX_RETRIES", os.getenv("RABBITMQ_MAX_RETRIES", "5")))
+    COMMUNICATION_CONSUMER_RETRY_DELAY_MS: int = int(os.getenv("COMMUNICATION_CONSUMER_RETRY_DELAY_MS", "1000"))
+    BROKER_PUBLISHED_UNPROCESSED_THRESHOLD_SECONDS: int = int(os.getenv("BROKER_PUBLISHED_UNPROCESSED_THRESHOLD_SECONDS", "300"))
 
     # ── Dedicated Redis for short-lived communication coordination only ───
     REDIS_ENABLED: bool = os.getenv("REDIS_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")

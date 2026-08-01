@@ -48,6 +48,7 @@ _METRICS = {
     "outbox_retry_total": 0,
     "outbox_dispatch_duration_seconds_sum": 0.0,
     "outbox_dispatch_duration_seconds_count": 0,
+    "fieldos_communication_broker_published_unprocessed": 0,
 }
 
 
@@ -603,6 +604,89 @@ async def run_once(
     return results
 
 
+async def broker_published_unprocessed(session: AsyncSession, *, threshold_seconds: int | None = None, limit: int = 50, branch_id: int | None = None) -> list[dict]:
+    """Read-only sanitized visibility for broker-published rows with no provider outcome.
+
+    RabbitMQ observability is deployment-specific; this DB-side check reports
+    sanitized operational IDs only and never republishes/mutates financial or
+    communication data.
+    """
+    threshold_seconds = threshold_seconds or settings.BROKER_PUBLISHED_UNPROCESSED_THRESHOLD_SECONDS
+    limit = max(1, min(int(limit or 50), 100))
+    branch_filter = "AND e.branch_id = :branch_id" if branch_id is not None else ""
+    params = {"threshold_seconds": threshold_seconds, "limit": limit, "branch_id": branch_id}
+    if _is_postgres(session):
+        rows = (
+            await session.execute(
+                text(
+                    f"""
+                    SELECT o.id AS outbox_id, o.broker_published_at, o.attempt_count,
+                           a.status AS attempt_status, e.status AS event_status, e.branch_id AS branch_id
+                    FROM client_communication_outbox o
+                    JOIN client_communication_attempts a ON a.id = o.attempt_id
+                    JOIN client_communication_events e ON e.id = o.event_id
+                    WHERE o.status = 'broker_published'
+                      AND o.broker_published_at <= (NOW() - (:threshold_seconds * INTERVAL '1 second'))
+                      AND a.status NOT IN ('submitted', 'provider_accepted', 'delivered', 'confirmed', 'disputed', 'cancelled', 'failed')
+                      AND a.provider_reference IS NULL
+                      AND a.submitted_at IS NULL
+                      {branch_filter}
+                    ORDER BY o.broker_published_at, o.id
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            )
+        ).mappings().all()
+    else:
+        rows = (
+            await session.execute(
+                text(
+                    f"""
+                    SELECT o.id AS outbox_id, o.broker_published_at, o.attempt_count,
+                           a.status AS attempt_status, e.status AS event_status, e.branch_id AS branch_id
+                    FROM client_communication_outbox o
+                    JOIN client_communication_attempts a ON a.id = o.attempt_id
+                    JOIN client_communication_events e ON e.id = o.event_id
+                    WHERE o.status = 'broker_published'
+                      AND o.broker_published_at <= datetime(CURRENT_TIMESTAMP, '-' || :threshold_seconds || ' seconds')
+                      AND a.status NOT IN ('submitted', 'provider_accepted', 'delivered', 'confirmed', 'disputed', 'cancelled', 'failed')
+                      AND a.provider_reference IS NULL
+                      AND a.submitted_at IS NULL
+                      {branch_filter}
+                    ORDER BY o.broker_published_at, o.id
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            )
+        ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def broker_published_unprocessed_summary(session: AsyncSession, *, threshold_seconds: int | None = None, limit: int = 50, branch_id: int | None = None) -> dict:
+    rows = await broker_published_unprocessed(session, threshold_seconds=threshold_seconds, limit=limit, branch_id=branch_id)
+    oldest = min((row.get("broker_published_at") for row in rows if row.get("broker_published_at")), default=None)
+    return {
+        "count": len(rows),
+        "oldest_broker_published_at": str(oldest) if oldest else None,
+        "threshold_seconds": threshold_seconds or settings.BROKER_PUBLISHED_UNPROCESSED_THRESHOLD_SECONDS,
+        "limit": max(1, min(int(limit or 50), 100)),
+        "branch_id": branch_id,
+        "items": [
+            {
+                "outbox_id": row.get("outbox_id"),
+                "branch_id": row.get("branch_id"),
+                "broker_published_at": str(row.get("broker_published_at")) if row.get("broker_published_at") else None,
+                "attempt_count": row.get("attempt_count"),
+                "attempt_status": row.get("attempt_status"),
+                "event_status": row.get("event_status"),
+            }
+            for row in rows
+        ],
+    }
+
+
 async def queue_health(session: AsyncSession) -> dict:
     db_reachable = True
     now = await _db_now(session)
@@ -630,6 +714,10 @@ async def queue_health(session: AsyncSession) -> dict:
         return max(0, int((ref - dt).total_seconds()))
 
     pending_age = age_seconds(oldest)
+    stranded = await broker_published_unprocessed(session)
+    _METRICS["fieldos_communication_broker_published_unprocessed"] = len(stranded)
+    if stranded:
+        logger.warning("broker_published_unprocessed", extra={"count": len(stranded), "outbox_ids": [row["outbox_id"] for row in stranded[:20]]})
     return {
         "process_alive": any(h.process_alive for h in heartbeats),
         "worker_enabled": settings.COMMUNICATION_WORKER_ENABLED,
@@ -647,6 +735,7 @@ async def queue_health(session: AsyncSession) -> dict:
         "broker_published_count": counts["broker_published"],
         "dead_count": counts["dead"],
         "oldest_pending_age_seconds": pending_age,
+        "broker_published_unprocessed_count": len(stranded),
     }
 
 
@@ -663,5 +752,8 @@ async def prometheus_metrics(session: AsyncSession) -> str:
         f"outbox_oldest_pending_seconds {health['oldest_pending_age_seconds'] or 0}",
         f"outbox_dispatch_duration_seconds_sum {_METRICS['outbox_dispatch_duration_seconds_sum']}",
         f"outbox_dispatch_duration_seconds_count {_METRICS['outbox_dispatch_duration_seconds_count']}",
+        f"# HELP fieldos_communication_broker_published_unprocessed Broker-published communication outbox rows older than {settings.BROKER_PUBLISHED_UNPROCESSED_THRESHOLD_SECONDS} seconds with no provider outcome.",
+        "# TYPE fieldos_communication_broker_published_unprocessed gauge",
+        f"fieldos_communication_broker_published_unprocessed {_METRICS['fieldos_communication_broker_published_unprocessed']}",
     ]
     return "\n".join(lines) + "\n"

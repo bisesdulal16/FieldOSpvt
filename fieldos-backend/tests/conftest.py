@@ -3,16 +3,26 @@ Test harness for the money paths. Uses an isolated SQLite test DB and drives the
 in-process (no server). The DB is reset + reseeded before every test for isolation.
 """
 import os
+import shutil
+import tempfile
+import uuid
+from pathlib import Path
 
 # Env must be set BEFORE importing anything from `app` (config reads it at import time).
+# Use a unique SQLite file for every pytest process so overlapping/background
+# test runs and xdist workers cannot share or lock the same persistent DB.
+_worker = os.getenv("PYTEST_XDIST_WORKER", "main")
+_test_db_dir = Path(tempfile.mkdtemp(prefix=f"fieldos-pytest-{os.getpid()}-{_worker}-{uuid.uuid4().hex[:8]}-"))
+_test_db_path = _test_db_dir / "fieldos_test.sqlite3"
 os.environ["DB_TYPE"] = "sqlite"
-os.environ["SQLITE_PATH"] = "/tmp/fieldos_test.db"
+os.environ["SQLITE_PATH"] = str(_test_db_path)
 os.environ["SMS_PROVIDER"] = "log"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key"
 os.environ["ORG_NAME"] = "TestMFI"
 # Tests make many rapid requests — disable rate limiting.
 os.environ["RATE_LIMIT"] = "999999"
 
+import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
@@ -76,3 +86,24 @@ async def login(client: AsyncClient, staff_id: str, pin: str = "1234") -> str:
 
 def auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_sqlite_database_cleanup():
+    """Dispose the module-level SQLAlchemy engine and remove the temp DB tree."""
+    yield
+    import asyncio
+    from app.database import engine
+
+    async def _dispose():
+        await engine.dispose()
+
+    try:
+        asyncio.run(_dispose())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_dispose())
+        finally:
+            loop.close()
+    shutil.rmtree(_test_db_dir, ignore_errors=True)
