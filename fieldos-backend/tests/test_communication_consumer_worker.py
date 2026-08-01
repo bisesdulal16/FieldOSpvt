@@ -6,12 +6,15 @@ import types
 import pytest
 
 from app.config import settings
+from app.services.communication_broker import BrokerAction, ConsumerOutcome, ConsumerProcessResult
 from app.workers import communication_consumer as consumer
 
 
 class FakeMessage:
-    def __init__(self, body):
+    def __init__(self, body, *, headers=None, routing_key="communication.sms"):
         self.body = body
+        self.headers = headers or {}
+        self.routing_key = routing_key
         self.acked = 0
         self.rejected = []
         self.nacked = []
@@ -74,6 +77,29 @@ class FakeConnection:
         self.closed = True
 
 
+class FakeRetryBroker:
+    published_retry = []
+    published_dlq = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def publish_retry(self, envelope, *, routing_key, retry_count, reason_code=None):
+        self.published_retry.append({"envelope": envelope, "routing_key": routing_key, "retry_count": retry_count, "reason_code": reason_code})
+
+    async def publish_dead_letter(self, envelope, *, routing_key, retry_count, reason_code=None):
+        self.published_dlq.append({"envelope": envelope, "routing_key": routing_key, "retry_count": retry_count, "reason_code": reason_code})
+
+
+@pytest.fixture(autouse=True)
+def reset_fake_retry_broker():
+    FakeRetryBroker.published_retry = []
+    FakeRetryBroker.published_dlq = []
+
+
 def install_fake_aio_pika(monkeypatch, queue):
     channel = FakeChannel(queue)
     connection = FakeConnection(channel)
@@ -92,7 +118,7 @@ async def test_continuous_mode_registers_visible_manual_consumer(monkeypatch):
     queue = FakeQueue()
     connection, channel, _ = install_fake_aio_pika(monkeypatch, queue)
     monkeypatch.setattr(settings, "RABBITMQ_ENABLED", True)
-    monkeypatch.setattr(settings, "RABBITMQ_URL", "amqp://fieldos:secret@rabbitmq:5672/%2Ffieldos")
+    monkeypatch.setattr(settings, "RABBITMQ_URL", "amqp://rabbitmq:5672/%2Ffieldos")
     monkeypatch.setattr(settings, "RABBITMQ_PREFETCH", 7)
     consumer._stop.clear()
 
@@ -119,7 +145,7 @@ async def test_one_shot_mode_uses_bounded_get_not_subscription(monkeypatch):
     queue = FakeQueue(message=message)
     install_fake_aio_pika(monkeypatch, queue)
     monkeypatch.setattr(settings, "RABBITMQ_ENABLED", True)
-    monkeypatch.setattr(settings, "RABBITMQ_URL", "amqp://fieldos:secret@rabbitmq:5672/%2Ffieldos")
+    monkeypatch.setattr(settings, "RABBITMQ_URL", "amqp://rabbitmq:5672/%2Ffieldos")
 
     await consumer.consume_rabbitmq(queue_name="fieldos.communication.sms", queue_key="sms", worker_id="one-shot", once=True)
 
@@ -136,7 +162,7 @@ async def test_manual_ack_happens_after_process_envelope_commit(monkeypatch):
 
     async def fake_process(envelope, *, worker_id):
         order.append("db_commit_complete")
-        return types.SimpleNamespace(status="published", outbox_id=envelope["outbox_id"])
+        return ConsumerProcessResult(ConsumerOutcome.PROVIDER_SUBMITTED, BrokerAction.ACK, outbox_id=envelope["outbox_id"], committed=True, reason_code="published")
 
     async def ack():
         order.append("ack")
@@ -192,7 +218,7 @@ async def test_final_state_duplicate_ack_without_provider(monkeypatch):
     message = FakeMessage(json.dumps(envelope).encode())
 
     async def duplicate(_envelope, *, worker_id):
-        return types.SimpleNamespace(status="already_submitted", outbox_id=1, provider_called=False)
+        return ConsumerProcessResult(ConsumerOutcome.FINAL_STATE_DUPLICATE, BrokerAction.ACK, outbox_id=1, provider_called=False, committed=True, reason_code="already_submitted")
 
     monkeypatch.setattr(consumer, "process_envelope", duplicate)
 
@@ -208,7 +234,7 @@ async def test_graceful_sigterm_path_cancels_subscription(monkeypatch):
     queue = FakeQueue()
     install_fake_aio_pika(monkeypatch, queue)
     monkeypatch.setattr(settings, "RABBITMQ_ENABLED", True)
-    monkeypatch.setattr(settings, "RABBITMQ_URL", "amqp://fieldos:secret@rabbitmq:5672/%2Ffieldos")
+    monkeypatch.setattr(settings, "RABBITMQ_URL", "amqp://rabbitmq:5672/%2Ffieldos")
     consumer._stop.clear()
 
     task = asyncio.create_task(consumer.consume_rabbitmq(queue_name="fieldos.communication.sms", queue_key="sms", worker_id="shutdown", once=False))
@@ -258,7 +284,7 @@ async def test_provider_invocation_occurs_exactly_once_per_delivery(monkeypatch)
 
     async def fake_process(_envelope, *, worker_id):
         calls["count"] += 1
-        return types.SimpleNamespace(status="published", outbox_id=1)
+        return ConsumerProcessResult(ConsumerOutcome.PROVIDER_SUBMITTED, BrokerAction.ACK, outbox_id=1, committed=True, reason_code="published")
 
     monkeypatch.setattr(consumer, "process_envelope", fake_process)
 
@@ -275,7 +301,7 @@ async def test_worker_logs_do_not_include_phone_body_or_credentials(monkeypatch,
     envelope = {"schema_version": 1, "message_id": "m1", "idempotency_key": "k1", "outbox_id": 1, "event_id": 1, "attempt_id": 1, "channel": "sms", "purpose": "collection_verification", "created_at": "2026-07-30T00:00:00Z", "trace_id": "t1"}
     message = FakeMessage(json.dumps(envelope).encode())
     secrets = [
-        "+9779841234567",
+        "+100****4567",
         "Sensitive SMS body",
         "provider-token-123",
         "rabbitmq-password-123",
@@ -310,3 +336,88 @@ def test_consumer_tag_sanitizes_identity_without_secrets():
     assert tag.startswith("fieldos-sms-consumer:")
     assert "/" not in tag
     assert "$" not in tag
+
+
+@pytest.mark.asyncio
+async def test_generic_successful_return_cannot_ack_without_explicit_outcome(monkeypatch):
+    envelope = {"schema_version": 1, "message_id": "m1", "idempotency_key": "k1", "outbox_id": 1, "event_id": 1, "attempt_id": 1, "channel": "sms", "purpose": "collection_verification", "created_at": "2026-07-30T00:00:00Z", "trace_id": "t1"}
+    message = FakeMessage(json.dumps(envelope).encode())
+
+    async def ambiguous(_envelope, *, worker_id):
+        return types.SimpleNamespace(status="published", outbox_id=1)
+
+    monkeypatch.setattr(consumer, "process_envelope", ambiguous)
+
+    await consumer._handle_message(message, worker_id="ambiguous")
+
+    assert message.acked == 0
+    assert message.nacked == [True]
+    assert message.rejected == []
+
+
+@pytest.mark.asyncio
+async def test_retryable_conflict_uses_delayed_retry_instead_of_immediate_nack(monkeypatch):
+    envelope = {"schema_version": 1, "message_id": "m1", "idempotency_key": "k1", "outbox_id": 1, "event_id": 1, "attempt_id": 1, "channel": "sms", "purpose": "collection_verification", "created_at": "2026-07-30T00:00:00Z", "trace_id": "t1"}
+    message = FakeMessage(json.dumps(envelope).encode())
+
+    async def conflict(_envelope, *, worker_id):
+        return ConsumerProcessResult(ConsumerOutcome.RETRYABLE_CONFLICT, BrokerAction.DELAYED_RETRY, outbox_id=1, committed=True, reason_code="state_conflict:processing")
+
+    monkeypatch.setattr(consumer, "process_envelope", conflict)
+    monkeypatch.setattr(consumer, "RabbitMQClient", FakeRetryBroker)
+    monkeypatch.setattr(settings, "COMMUNICATION_CONSUMER_MAX_RETRIES", 5)
+
+    await consumer._handle_message(message, worker_id="conflict")
+
+    assert message.acked == 1
+    assert message.nacked == []
+    assert message.rejected == []
+    assert FakeRetryBroker.published_retry[0]["retry_count"] == 1
+    assert FakeRetryBroker.published_retry[0]["routing_key"] == "communication.sms"
+
+
+@pytest.mark.asyncio
+async def test_idempotency_mismatch_reaches_dlq(monkeypatch):
+    envelope = {"schema_version": 1, "message_id": "m1", "idempotency_key": "k1", "outbox_id": 1, "event_id": 1, "attempt_id": 1, "channel": "sms", "purpose": "collection_verification", "created_at": "2026-07-30T00:00:00Z", "trace_id": "t1"}
+    message = FakeMessage(json.dumps(envelope).encode())
+
+    async def mismatch(_envelope, *, worker_id):
+        return ConsumerProcessResult(ConsumerOutcome.IDEMPOTENCY_MISMATCH, BrokerAction.REJECT_DLQ, outbox_id=1, committed=True, reason_code="idempotency_mismatch")
+
+    monkeypatch.setattr(consumer, "process_envelope", mismatch)
+
+    await consumer._handle_message(message, worker_id="mismatch")
+
+    assert message.acked == 0
+    assert message.nacked == []
+    assert message.rejected == [False]
+
+
+def test_consumer_outcome_mapping_is_exhaustive_and_fail_closed():
+    assert set(consumer.OUTCOME_BROKER_ACTIONS) == set(ConsumerOutcome)
+    for outcome in ConsumerOutcome:
+        assert isinstance(consumer.broker_action_for_outcome(outcome), BrokerAction)
+    for ambiguous in (None, True, False, "published"):
+        with pytest.raises(ValueError):
+            consumer.broker_action_for_outcome(ambiguous)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_retryable_conflict_max_retry_publishes_dlq_then_acks_original(monkeypatch):
+    envelope = {"schema_version": 1, "message_id": "m1", "idempotency_key": "k1", "outbox_id": 1, "event_id": 1, "attempt_id": 1, "channel": "sms", "purpose": "collection_verification", "created_at": "2026-07-30T00:00:00Z", "trace_id": "t1"}
+    message = FakeMessage(json.dumps(envelope).encode(), headers={"x-fieldos-consumer-retry-count": 1})
+
+    async def conflict(_envelope, *, worker_id):
+        return ConsumerProcessResult(ConsumerOutcome.RETRYABLE_CONFLICT, BrokerAction.DELAYED_RETRY, outbox_id=1, committed=True, reason_code="state_conflict:processing")
+
+    monkeypatch.setattr(consumer, "process_envelope", conflict)
+    monkeypatch.setattr(consumer, "RabbitMQClient", FakeRetryBroker)
+    monkeypatch.setattr(settings, "COMMUNICATION_CONSUMER_MAX_RETRIES", 2)
+
+    await consumer._handle_message(message, worker_id="conflict-max")
+
+    assert message.acked == 1
+    assert message.nacked == []
+    assert message.rejected == []
+    assert FakeRetryBroker.published_retry == []
+    assert FakeRetryBroker.published_dlq[0]["retry_count"] == 2
