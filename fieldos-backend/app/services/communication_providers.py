@@ -138,6 +138,11 @@ class SparrowSmsProvider(CommunicationProvider):
             return DispatchResult("permanent_failure", error_code="unsupported_channel", safe_error_message="unsupported communication channel", idempotency_key_used=idempotency_key)
         if not isinstance(payload, dict) or "message" not in payload:
             return DispatchResult("permanent_failure", error_code="malformed_payload", safe_error_message="malformed communication payload", idempotency_key_used=idempotency_key)
+        from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety
+
+        safety_decision = evaluate_sms_dispatch_safety(payload)
+        if not safety_decision.allowed:
+            return safety_decision.to_result(idempotency_key=idempotency_key)
         if not settings.SMS_API_TOKEN or not settings.SMS_SENDER or not settings.SMS_SPARROW_URL:
             return DispatchResult("permanent_failure", error_code="provider_configuration_error", safe_error_message="Sparrow SMS provider is not configured", idempotency_key_used=idempotency_key)
         try:

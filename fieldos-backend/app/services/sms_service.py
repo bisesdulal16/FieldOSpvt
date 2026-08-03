@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.sms_notification import SmsNotification
+from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,12 @@ async def send_sms(to: str, message: str) -> tuple[bool, str | None]:
         return False, "no phone number"
 
     if provider == "log":
-        logger.info("SMS[log] → %s : %s", to, message)
+        logger.info("SMS[log] submitted")
         return True, None
+
+    safety_decision = evaluate_sms_dispatch_safety({"channel": "sms", "provider": provider, "recipient": to, "message": message})
+    if not safety_decision.allowed:
+        return False, safety_decision.code
 
     if provider == "sparrow":
         if not settings.SMS_API_TOKEN:

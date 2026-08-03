@@ -26,6 +26,7 @@ from app.models.client_communication import (
 from app.models.sms_notification import SmsNotification
 from app.services.audit_helper import write_audit
 from app.services.communication_providers import DispatchResult, parse_payload, provider_for
+from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety, sms_safety_metrics_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -564,6 +565,14 @@ async def process_claimed_outbox(
         # end transaction before provider call
         await session.commit()
 
+    safety_decision = evaluate_sms_dispatch_safety(payload)
+    if not safety_decision.allowed:
+        result = safety_decision.to_result(idempotency_key=claimed.idempotency_key)
+        async with session_factory() as session:
+            process_result = await persist_dispatch_result(session, outbox_id=claimed.id, worker_id=worker_id, result=result, jitter_fn=jitter_fn)
+            await session.commit()
+            return process_result
+
     provider = provider_for(payload)
     start = monotonic()
     result = await provider.dispatch(attempt=type("AttemptSnapshot", (), {"channel": "sms", "provider": payload.get("provider", "log"), "recipient": payload.get("recipient")})(), payload=payload, idempotency_key=claimed.idempotency_key)
@@ -755,5 +764,10 @@ async def prometheus_metrics(session: AsyncSession) -> str:
         f"# HELP fieldos_communication_broker_published_unprocessed Broker-published communication outbox rows older than {settings.BROKER_PUBLISHED_UNPROCESSED_THRESHOLD_SECONDS} seconds with no provider outcome.",
         "# TYPE fieldos_communication_broker_published_unprocessed gauge",
         f"fieldos_communication_broker_published_unprocessed {_METRICS['fieldos_communication_broker_published_unprocessed']}",
+        "# HELP fieldos_sms_dispatch_safety_block_total SMS dispatches blocked by fail-closed safety decision.",
+        "# TYPE fieldos_sms_dispatch_safety_block_total counter",
     ]
+    for decision_code, count in sorted(sms_safety_metrics_snapshot().items()):
+        if decision_code.startswith("blocked_"):
+            lines.append(f'fieldos_sms_dispatch_safety_block_total{{decision="{decision_code}"}} {count}')
     return "\n".join(lines) + "\n"
