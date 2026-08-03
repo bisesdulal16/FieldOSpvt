@@ -26,6 +26,7 @@ from app.services.communication_outbox_service import (
     persist_dispatch_result,
 )
 from app.services.communication_providers import DispatchResult, provider_for
+from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety
 from app.services.audit_helper import write_audit
 
 logger = logging.getLogger(__name__)
@@ -108,9 +109,9 @@ def _map_dispatch_persist_result(result: ProcessResult) -> ConsumerProcessResult
     if result.status == "retry_scheduled":
         return _consumer_result(ConsumerOutcome.PROVIDER_RETRY_SCHEDULED, BrokerAction.ACK, outbox_id=result.outbox_id, provider_called=True, committed=True, reason_code=result.status, error=result.error)
     if result.status == "dead":
-        return _consumer_result(ConsumerOutcome.PERMANENT_INVALID, BrokerAction.REJECT_DLQ, outbox_id=result.outbox_id, provider_called=True, committed=True, reason_code=result.status, error=result.error)
+        return _consumer_result(ConsumerOutcome.PERMANENT_INVALID, BrokerAction.REJECT_DLQ, outbox_id=result.outbox_id, provider_called=result.provider_called, committed=True, reason_code=result.status, error=result.error)
     if result.status == "lock_lost":
-        return _consumer_result(ConsumerOutcome.RETRYABLE_CONFLICT, BrokerAction.DELAYED_RETRY, outbox_id=result.outbox_id, provider_called=True, committed=False, reason_code=result.status, error=result.error)
+        return _consumer_result(ConsumerOutcome.RETRYABLE_CONFLICT, BrokerAction.DELAYED_RETRY, outbox_id=result.outbox_id, provider_called=result.provider_called, committed=False, reason_code=result.status, error=result.error)
     return _consumer_result(ConsumerOutcome.UNEXPECTED_STATE, BrokerAction.DELAYED_RETRY, outbox_id=result.outbox_id, provider_called=result.provider_called, committed=False, reason_code=result.status, error=result.error)
 
 
@@ -420,6 +421,14 @@ async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_
         payload = json.loads(attempt.metadata_json or "{}") if attempt else {}
         payload.update({"event_id": envelope["event_id"], "attempt_id": envelope["attempt_id"], "channel": envelope["channel"], "purpose": envelope["purpose"], "provider": attempt.provider if attempt else "log", "recipient": attempt.recipient if attempt else None})
         await session.commit()
+    safety_decision = evaluate_sms_dispatch_safety(payload)
+    if not safety_decision.allowed:
+        result = safety_decision.to_result(idempotency_key=envelope["idempotency_key"])
+        async with session_factory() as session:
+            process_result = await persist_dispatch_result(session, outbox_id=outbox_id, worker_id=worker_id, result=result)
+            await session.commit()
+            return _map_dispatch_persist_result(process_result)
+
     provider = provider_for(payload)
     result = await provider.dispatch(attempt=attempt, payload=payload, idempotency_key=envelope["idempotency_key"])
     async with session_factory() as session:

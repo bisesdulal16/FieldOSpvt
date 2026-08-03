@@ -12,6 +12,7 @@ from app.models.client_communication import ClientCommunicationAttempt, ClientCo
 from app.models.sms_notification import SmsNotification
 from app.services.communication_outbox_service import run_once
 from app.services.communication_providers import LogSmsProvider, SparrowSmsProvider, normalize_nepal_phone
+from app.services.sms_dispatch_safety import DispatchSafetyDecision
 from tests.test_communication_outbox_worker import _make_outbox
 
 PHONE = "+977-9800000001"
@@ -33,11 +34,26 @@ class FakeResponse:
 
 def _patch_sparrow_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "SMS_PROVIDER", "sparrow")
+    monkeypatch.setattr(settings, "REAL_SMS_ENABLED", True)
+    monkeypatch.setattr(settings, "SMS_PROVIDER_ALLOWLIST", "sparrow")
+    monkeypatch.setattr(settings, "SMS_ALLOWED_RECIPIENTS", PHONE)
+    monkeypatch.setattr(settings, "SMS_DAILY_SEND_LIMIT", 1)
+    monkeypatch.setattr(settings, "SMS_PER_RECIPIENT_DAILY_LIMIT", 1)
+    monkeypatch.setattr(settings, "SMS_MAX_COST_PER_DAY", 1)
+    monkeypatch.setattr(settings, "SMS_EMERGENCY_STOP", False)
+    monkeypatch.setattr(settings, "SMS_PROVIDER_IDEMPOTENCY_ENABLED", True)
+    monkeypatch.setattr(settings, "SMS_PROVIDER_RECONCILIATION_ENABLED", True)
+    monkeypatch.setattr(settings, "SMS_REQUIRE_APPROVED_TEMPLATE", False)
+    monkeypatch.setattr(settings, "SMS_REQUIRE_CONSENT", False)
+    monkeypatch.setattr(settings, "SMS_REQUIRE_SUPPRESSION_CHECK", False)
     monkeypatch.setattr(settings, "SMS_API_TOKEN", TOKEN)
     monkeypatch.setattr(settings, "SMS_SENDER", "FieldOS")
     monkeypatch.setattr(settings, "SMS_SPARROW_URL", "https://sparrow.test/sms")
     monkeypatch.setattr(settings, "SMS_REQUEST_TIMEOUT_SECONDS", 10)
     monkeypatch.setattr(settings, "COMMUNICATION_WORKER_ENABLED", True)
+    allow = DispatchSafetyDecision(True, "allowed_real_provider", "sparrow", "real_sms", "test override")
+    monkeypatch.setattr("app.services.communication_outbox_service.evaluate_sms_dispatch_safety", lambda payload: allow)
+    monkeypatch.setattr("app.services.sms_dispatch_safety.evaluate_sms_dispatch_safety", lambda payload: allow)
 
 
 async def _make_sparrow_outbox(client: AsyncClient, monkeypatch: pytest.MonkeyPatch, receipt_id="RCPT-SPARROW-001"):
