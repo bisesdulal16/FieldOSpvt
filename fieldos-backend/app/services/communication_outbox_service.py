@@ -26,7 +26,8 @@ from app.models.client_communication import (
 from app.models.sms_notification import SmsNotification
 from app.services.audit_helper import write_audit
 from app.services.communication_providers import DispatchResult, parse_payload, provider_for
-from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety, sms_safety_metrics_snapshot
+from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety, evaluate_sms_dispatch_safety_async, sms_safety_metrics_snapshot
+from app.services.sms_policy import commit_quota_reservation, mark_provider_call_started, mark_quota_provider_uncertain, release_quota_reservation, sms_policy_metrics_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ FINAL_ATTEMPT_STATUSES = {
 }
 DISPATCH_BLOCKING_STATUSES = FINAL_ATTEMPT_STATUSES - {"failed"}
 CLAIMABLE_OUTBOX_STATUSES = {"pending", "retryable", "broker_published"}
-TERMINAL_OUTBOX_STATUSES = {"published", "dead", "cancelled", "skipped"}
+TERMINAL_OUTBOX_STATUSES = {"published", "dead", "cancelled", "skipped", "provider_uncertain", "provider_call_started"}
 
 _METRICS = {
     "outbox_dispatch_success_total": 0,
@@ -196,6 +197,56 @@ async def upsert_worker_heartbeat(
         existing.last_error = last_error[:500]
 
 
+async def recover_provider_call_started(session: AsyncSession, worker_id: str, *, lock_timeout_seconds: int | None = None) -> int:
+    timeout_seconds = lock_timeout_seconds or settings.OUTBOX_LOCK_TIMEOUT_SECONDS
+    now = await _db_now(session)
+    if _is_postgres(session):
+        rows = (await session.execute(text("""
+            SELECT o.id
+            FROM client_communication_outbox o
+            JOIN client_communication_attempts a ON a.id = o.attempt_id
+            WHERE (o.status = 'provider_call_started' OR a.status = 'provider_call_started')
+              AND COALESCE(o.provider_call_started_at, a.provider_call_started_at, o.updated_at) <= (NOW() - (:timeout_seconds * INTERVAL '1 second'))
+              AND a.provider_reference IS NULL
+              AND a.submitted_at IS NULL
+            FOR UPDATE OF o SKIP LOCKED
+        """), {"timeout_seconds": timeout_seconds})).mappings().all()
+    else:
+        rows = (await session.execute(text("""
+            SELECT o.id
+            FROM client_communication_outbox o
+            JOIN client_communication_attempts a ON a.id = o.attempt_id
+            WHERE (o.status = 'provider_call_started' OR a.status = 'provider_call_started')
+              AND COALESCE(o.provider_call_started_at, a.provider_call_started_at, o.updated_at) <= datetime(CURRENT_TIMESTAMP, '-' || :timeout_seconds || ' seconds')
+              AND a.provider_reference IS NULL
+              AND a.submitted_at IS NULL
+        """), {"timeout_seconds": timeout_seconds})).mappings().all()
+    recovered = 0
+    for row in rows:
+        loaded = await session.execute(
+            select(ClientCommunicationOutbox, ClientCommunicationAttempt, ClientCommunicationEvent)
+            .join(ClientCommunicationAttempt, ClientCommunicationAttempt.id == ClientCommunicationOutbox.attempt_id)
+            .join(ClientCommunicationEvent, ClientCommunicationEvent.id == ClientCommunicationOutbox.event_id)
+            .where(ClientCommunicationOutbox.id == row["id"])
+        )
+        found = loaded.first()
+        if not found:
+            continue
+        outbox, attempt, event = found
+        outbox.status = "provider_uncertain"
+        outbox.locked_at = None
+        outbox.locked_by = None
+        outbox.last_error_code = "provider_uncertain"
+        outbox.last_error = "provider call started before crash; manual reconciliation required"
+        attempt.status = "provider_uncertain"
+        attempt.error_code = "provider_uncertain"
+        attempt.error_message = "provider call started before crash; automatic resend prohibited"
+        event.status = "provider_uncertain"
+        await mark_quota_provider_uncertain(session, outbox_id=outbox.id, attempt_id=attempt.id)
+        await write_system_audit(session, "communication_provider_uncertain_recovered", entity_type="client_communication_outbox", entity_id=outbox.id, meta={"outbox_id": outbox.id, "attempt_id": attempt.id, "event_id": event.id, "worker_id": worker_id})
+        recovered += 1
+    return recovered
+
 async def recover_cancelled_outbox(session: AsyncSession, worker_id: str) -> int:
     now = await _db_now(session)
     rows = (
@@ -307,6 +358,7 @@ async def claim_outbox_batch(
 ) -> list[ClaimedOutbox]:
     limit = max(1, batch_size or settings.OUTBOX_BATCH_SIZE)
     timeout_seconds = lock_timeout_seconds or settings.OUTBOX_LOCK_TIMEOUT_SECONDS
+    await recover_provider_call_started(session, worker_id, lock_timeout_seconds=timeout_seconds)
     await recover_cancelled_outbox(session, worker_id)
     await recover_stale_locks(session, worker_id, lock_timeout_seconds=timeout_seconds)
     await session.flush()
@@ -424,7 +476,7 @@ async def _load_processing_owned(session: AsyncSession, outbox_id: int, worker_i
             .join(ClientCommunicationAttempt, ClientCommunicationAttempt.id == ClientCommunicationOutbox.attempt_id)
             .join(ClientCommunicationEvent, ClientCommunicationEvent.id == ClientCommunicationOutbox.event_id)
             .where(ClientCommunicationOutbox.id == outbox_id)
-            .where(ClientCommunicationOutbox.status == "processing")
+            .where(ClientCommunicationOutbox.status.in_(["processing", "provider_call_started"]))
             .where(ClientCommunicationOutbox.locked_by == worker_id)
         )
     ).first()
@@ -471,6 +523,7 @@ async def persist_dispatch_result(
         attempt.provider_reference = result.provider_reference
         attempt.submitted_at = now
         event.status = "provider_accepted"
+        await commit_quota_reservation(session, outbox_id=outbox.id, attempt_id=attempt.id)
         await upsert_legacy_sms_notification(session, event=event, attempt=attempt, status="submitted", error=None)
         _METRICS["outbox_dispatch_success_total"] += 1
         await upsert_worker_heartbeat(session, worker_id=worker_id, worker_enabled=settings.COMMUNICATION_WORKER_ENABLED, successful_dispatch=True)
@@ -482,6 +535,26 @@ async def persist_dispatch_result(
             meta={"outbox_id": outbox.id, "attempt_id": attempt.id, "event_id": event.id, "worker_id": worker_id, "provider_status": result.provider_status, "idempotency_key_used": result.idempotency_key_used},
         )
         return ProcessResult(status="published", outbox_id=outbox.id)
+
+    if result.error_code == "provider_uncertain":
+        outbox.status = "provider_uncertain"
+        outbox.locked_at = None
+        outbox.locked_by = None
+        outbox.last_error = "provider outcome uncertain; manual reconciliation required"
+        outbox.last_error_code = "provider_uncertain"
+        attempt.status = "provider_uncertain"
+        attempt.error_code = "provider_uncertain"
+        attempt.error_message = "provider outcome uncertain; automatic resend prohibited"
+        event.status = "provider_uncertain"
+        await mark_quota_provider_uncertain(session, outbox_id=outbox.id, attempt_id=attempt.id)
+        await write_system_audit(
+            session,
+            "communication_provider_uncertain",
+            entity_type="client_communication_outbox",
+            entity_id=outbox.id,
+            meta={"outbox_id": outbox.id, "attempt_id": attempt.id, "event_id": event.id, "worker_id": worker_id, "manual_review_required": True},
+        )
+        return ProcessResult(status="provider_uncertain", outbox_id=outbox.id, error="provider outcome uncertain")
 
     _METRICS["outbox_dispatch_failure_total"] += 1
     final = result.outcome == "permanent_failure" or (outbox.attempt_count or 0) >= min(outbox.max_retries or settings.OUTBOX_MAX_ATTEMPTS, settings.OUTBOX_MAX_ATTEMPTS)
@@ -496,6 +569,7 @@ async def persist_dispatch_result(
         attempt.error_code = result.error_code
         attempt.error_message = result.safe_error_message
         event.status = "failed"
+        await release_quota_reservation(session, outbox_id=outbox.id, attempt_id=attempt.id, reason=result.error_code or "pre_provider_failure")
         await upsert_legacy_sms_notification(session, event=event, attempt=attempt, status="failed", error=result.safe_error_message)
         await write_system_audit(
             session,
@@ -512,6 +586,8 @@ async def persist_dispatch_result(
         jitter_fn=jitter_fn,
     )
     outbox.status = "pending"
+    attempt.status = "queued"
+    attempt.provider_call_started_at = None
     outbox.retry_count = (outbox.retry_count or 0) + 1
     if _is_postgres(session):
         await session.flush()
@@ -562,20 +638,35 @@ async def process_claimed_outbox(
             outbox.locked_by = None
             await session.commit()
             return ProcessResult(status="already_submitted", outbox_id=outbox.id)
-        # end transaction before provider call
-        await session.commit()
-
-    safety_decision = evaluate_sms_dispatch_safety(payload)
-    if not safety_decision.allowed:
-        result = safety_decision.to_result(idempotency_key=claimed.idempotency_key)
-        async with session_factory() as session:
+        payload.update({"outbox_id": outbox.id, "attempt_id": attempt.id, "event_id": event.id, "branch_id": event.branch_id, "purpose": payload.get("purpose") or event.purpose, "language": payload.get("language") or event.language, "provider": payload.get("provider") or attempt.provider})
+        safety_decision = await evaluate_sms_dispatch_safety_async(payload, session=session)
+        if not safety_decision.allowed:
+            result = safety_decision.to_result(idempotency_key=claimed.idempotency_key)
             process_result = await persist_dispatch_result(session, outbox_id=claimed.id, worker_id=worker_id, result=result, jitter_fn=jitter_fn)
             await session.commit()
             return process_result
+        now = await _db_now(session)
+        outbox.status = "provider_call_started"
+        outbox.provider_call_started_at = now
+        outbox.sms_template_key = payload.get("template_key")
+        outbox.sms_template_version = payload.get("template_version")
+        attempt.status = "provider_call_started"
+        attempt.provider_call_started_at = now
+        attempt.sms_template_key = payload.get("template_key")
+        attempt.sms_template_version = payload.get("template_version")
+        event.sms_template_key = payload.get("template_key")
+        event.sms_template_version = payload.get("template_version")
+        await mark_provider_call_started(session, outbox_id=outbox.id, attempt_id=attempt.id)
+        payload["sms_policy_approved"] = True
+        await session.commit()
 
     provider = provider_for(payload)
     start = monotonic()
-    result = await provider.dispatch(attempt=type("AttemptSnapshot", (), {"channel": "sms", "provider": payload.get("provider", "log"), "recipient": payload.get("recipient")})(), payload=payload, idempotency_key=claimed.idempotency_key)
+    try:
+        result = await provider.dispatch(attempt=type("AttemptSnapshot", (), {"channel": "sms", "provider": payload.get("provider", "log"), "recipient": payload.get("recipient")})(), payload=payload, idempotency_key=claimed.idempotency_key)
+    except Exception:
+        logger.exception("provider outcome uncertain after provider boundary")
+        result = DispatchResult("permanent_failure", error_code="provider_uncertain", safe_error_message="provider outcome uncertain; manual reconciliation required", idempotency_key_used=claimed.idempotency_key)
     elapsed = monotonic() - start
     _METRICS["outbox_dispatch_duration_seconds_sum"] += elapsed
     _METRICS["outbox_dispatch_duration_seconds_count"] += 1
@@ -770,4 +861,6 @@ async def prometheus_metrics(session: AsyncSession) -> str:
     for decision_code, count in sorted(sms_safety_metrics_snapshot().items()):
         if decision_code.startswith("blocked_"):
             lines.append(f'fieldos_sms_dispatch_safety_block_total{{decision="{decision_code}"}} {count}')
+    for name, count in sorted(sms_policy_metrics_snapshot().items()):
+        lines.append(f"{name} {count}")
     return "\n".join(lines) + "\n"

@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime
 
 import httpx
 import pytest
@@ -8,11 +9,12 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.models.client_communication import ClientCommunicationAttempt, ClientCommunicationOutbox
+from app.models.client_communication import ClientCommunicationAttempt, ClientCommunicationOutbox, SmsApprovedTemplate, SmsConsentEvidence
 from app.models.sms_notification import SmsNotification
 from app.services.communication_outbox_service import run_once
 from app.services.communication_providers import LogSmsProvider, SparrowSmsProvider, normalize_nepal_phone
 from app.services.sms_dispatch_safety import DispatchSafetyDecision
+from app.services.sms_policy import recipient_hash, template_content_hash
 from tests.test_communication_outbox_worker import _make_outbox
 
 PHONE = "+977-9800000001"
@@ -33,6 +35,7 @@ class FakeResponse:
 
 
 def _patch_sparrow_settings(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "SMS_POLICY_HASH_PEPPER", "fake-test-pepper-material")
     monkeypatch.setattr(settings, "SMS_PROVIDER", "sparrow")
     monkeypatch.setattr(settings, "REAL_SMS_ENABLED", True)
     monkeypatch.setattr(settings, "SMS_PROVIDER_ALLOWLIST", "sparrow")
@@ -53,6 +56,9 @@ def _patch_sparrow_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "COMMUNICATION_WORKER_ENABLED", True)
     allow = DispatchSafetyDecision(True, "allowed_real_provider", "sparrow", "real_sms", "test override")
     monkeypatch.setattr("app.services.communication_outbox_service.evaluate_sms_dispatch_safety", lambda payload: allow)
+    async def allow_async(payload, *, session, recipient_allowlist=None):
+        return allow
+    monkeypatch.setattr("app.services.communication_outbox_service.evaluate_sms_dispatch_safety_async", allow_async)
     monkeypatch.setattr("app.services.sms_dispatch_safety.evaluate_sms_dispatch_safety", lambda payload: allow)
 
 
@@ -64,8 +70,15 @@ async def _make_sparrow_outbox(client: AsyncClient, monkeypatch: pytest.MonkeyPa
         attempt = await s.get(ClientCommunicationAttempt, outbox.attempt_id)
         payload = json.loads(outbox.payload_json)
         payload["provider"] = "sparrow"
+        payload["template_key"] = "receipt"
+        payload["template_version"] = "v1"
+        payload["purpose"] = "collection_verification"
+        payload["language"] = "en"
         outbox.payload_json = json.dumps(payload)
         attempt.provider = "sparrow"
+        now = datetime.utcnow()
+        s.add(SmsConsentEvidence(recipient_hash=recipient_hash(PHONE), purpose="collection_verification", status="granted", consent_source="test", consent_version="v1", granted_at=now, branch_id=1))
+        s.add(SmsApprovedTemplate(template_key="receipt", version="v1", language="en", purpose="collection_verification", body_template=payload.get("message") or "test", allowed_variables_json="[]", content_hash=template_content_hash(payload.get("message") or "test", []), active=True, approval_status="approved", approved_at=now, branch_id=1))
         await s.commit()
     return outbox_id
 

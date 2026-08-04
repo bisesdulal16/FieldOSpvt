@@ -26,7 +26,7 @@ from app.services.communication_outbox_service import (
     persist_dispatch_result,
 )
 from app.services.communication_providers import DispatchResult, provider_for
-from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety
+from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety, evaluate_sms_dispatch_safety_async
 from app.services.audit_helper import write_audit
 
 logger = logging.getLogger(__name__)
@@ -415,22 +415,37 @@ async def process_envelope(envelope: dict[str, Any], *, worker_id: str, session_
         outbox.last_attempted_at = outbox.locked_at
         await session.commit()
 
-    # Provider payload is intentionally fetched from PostgreSQL, not trusted from RabbitMQ.
     async with session_factory() as session:
-        attempt = await session.get(ClientCommunicationAttempt, int(envelope["attempt_id"]))
-        payload = json.loads(attempt.metadata_json or "{}") if attempt else {}
-        payload.update({"event_id": envelope["event_id"], "attempt_id": envelope["attempt_id"], "channel": envelope["channel"], "purpose": envelope["purpose"], "provider": attempt.provider if attempt else "log", "recipient": attempt.recipient if attempt else None})
-        await session.commit()
-    safety_decision = evaluate_sms_dispatch_safety(payload)
-    if not safety_decision.allowed:
-        result = safety_decision.to_result(idempotency_key=envelope["idempotency_key"])
-        async with session_factory() as session:
+        row = (
+            await session.execute(
+                select(ClientCommunicationAttempt, ClientCommunicationEvent)
+                .join(ClientCommunicationEvent, ClientCommunicationEvent.id == ClientCommunicationAttempt.event_id)
+                .where(ClientCommunicationAttempt.id == int(envelope["attempt_id"]))
+            )
+        ).first()
+        if row:
+            attempt, event = row
+            payload = json.loads(attempt.metadata_json or "{}")
+            payload.setdefault("recipient", attempt.recipient)
+            payload.update({"outbox_id": outbox_id, "event_id": event.id, "attempt_id": attempt.id, "branch_id": event.branch_id, "channel": envelope["channel"], "purpose": envelope["purpose"], "language": event.language, "provider": attempt.provider})
+        else:
+            attempt = None
+            payload = {}
+        safety_decision = await evaluate_sms_dispatch_safety_async(payload, session=session)
+        if not safety_decision.allowed:
+            result = safety_decision.to_result(idempotency_key=envelope["idempotency_key"])
             process_result = await persist_dispatch_result(session, outbox_id=outbox_id, worker_id=worker_id, result=result)
             await session.commit()
             return _map_dispatch_persist_result(process_result)
+        payload["sms_policy_approved"] = True
+        await session.commit()
 
     provider = provider_for(payload)
-    result = await provider.dispatch(attempt=attempt, payload=payload, idempotency_key=envelope["idempotency_key"])
+    try:
+        result = await provider.dispatch(attempt=attempt, payload=payload, idempotency_key=envelope["idempotency_key"])
+    except Exception:
+        logger.exception("broker consumer provider outcome uncertain after provider boundary")
+        result = DispatchResult("permanent_failure", error_code="provider_uncertain", safe_error_message="provider outcome uncertain; manual reconciliation required", idempotency_key_used=envelope["idempotency_key"])
     async with session_factory() as session:
         process_result = await persist_dispatch_result(session, outbox_id=outbox_id, worker_id=worker_id, result=result)
         await session.commit()

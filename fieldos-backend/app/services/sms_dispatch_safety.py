@@ -4,12 +4,15 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 SAFE_LOG_PROVIDERS = {"log", "log_sms"}
-REAL_SMS_PROVIDERS = {"sparrow", "sparrow_http"}
+REAL_SMS_PROVIDERS = {"sparrow", "sparrow_http", "fake_verified_real_sms"}
+VERIFIED_REAL_SMS_PROVIDERS = {"fake_verified_real_sms"}
 KNOWN_SMS_PROVIDERS = SAFE_LOG_PROVIDERS | REAL_SMS_PROVIDERS
 
 DECISION_ALLOWED_LOG_PROVIDER = "allowed_log_provider"
@@ -26,9 +29,14 @@ DECISION_COST_LIMIT_CLOSED = "blocked_cost_limit_closed"
 DECISION_IDEMPOTENCY_UNCERTAIN = "blocked_idempotency_uncertain"
 DECISION_RECONCILIATION_UNAVAILABLE = "blocked_reconciliation_unavailable"
 DECISION_ATOMIC_QUOTA_UNAVAILABLE = "blocked_atomic_quota_unavailable"
+DECISION_PROVIDER_READINESS_UNVERIFIED = "blocked_provider_readiness_unverified"
 DECISION_TEMPLATE_SERVICE_MISSING = "blocked_template_service_missing"
 DECISION_CONSENT_SERVICE_MISSING = "blocked_consent_service_missing"
 DECISION_SUPPRESSION_SERVICE_MISSING = "blocked_suppression_service_missing"
+DECISION_CONSENT_DENIED = "blocked_consent_denied"
+DECISION_TEMPLATE_NOT_APPROVED = "blocked_template_not_approved"
+DECISION_SUPPRESSED = "blocked_suppressed"
+DECISION_QUOTA_RESERVED = "quota_reserved"
 
 SMS_SAFETY_DECISION_CODES = {
     DECISION_ALLOWED_LOG_PROVIDER,
@@ -44,9 +52,14 @@ SMS_SAFETY_DECISION_CODES = {
     DECISION_COST_LIMIT_CLOSED,
     DECISION_IDEMPOTENCY_UNCERTAIN,
     DECISION_RECONCILIATION_UNAVAILABLE,
+    DECISION_PROVIDER_READINESS_UNVERIFIED,
     DECISION_TEMPLATE_SERVICE_MISSING,
     DECISION_CONSENT_SERVICE_MISSING,
     DECISION_SUPPRESSION_SERVICE_MISSING,
+    DECISION_CONSENT_DENIED,
+    DECISION_TEMPLATE_NOT_APPROVED,
+    DECISION_SUPPRESSED,
+    DECISION_QUOTA_RESERVED,
 }
 
 _SAFETY_METRICS = {code: 0 for code in SMS_SAFETY_DECISION_CODES}
@@ -272,3 +285,74 @@ def evaluate_sms_dispatch_safety(
         DECISION_ATOMIC_QUOTA_UNAVAILABLE,
         "persistent atomic SMS quota reservation is not implemented",
     )
+
+async def evaluate_sms_dispatch_safety_async(payload: dict, *, session: AsyncSession, recipient_allowlist: RecipientAllowlist | None = None) -> DispatchSafetyDecision:
+    """Persistent fail-closed SMS policy gate for real providers.
+
+    Evaluation order: provider classification, real-SMS feature gates, emergency
+    stop, provider allowlist, recipient allowlist, consent, template, suppression,
+    atomic quota reservation. Provider invocation must occur only after this
+    returns allowed=True. Suppression is evaluated after consent/template but is
+    still an overriding veto.
+    """
+    provider = str(payload.get("provider") or settings.SMS_PROVIDER or "log").strip().lower()
+    classification = classify_sms_provider(provider)
+    if classification == "safe_log":
+        return _record(DispatchSafetyDecision(True, DECISION_ALLOWED_LOG_PROVIDER, provider, classification, "log provider allowed"))
+    if classification == "unknown":
+        return _block(provider, classification, DECISION_UNKNOWN_PROVIDER, "unknown SMS provider blocked")
+    try:
+        real_sms_enabled = _parse_bool(settings.REAL_SMS_ENABLED, name="REAL_SMS_ENABLED")
+        emergency_stop = _parse_bool(settings.SMS_EMERGENCY_STOP, name="SMS_EMERGENCY_STOP")
+        idempotency_enabled = _parse_bool(settings.SMS_PROVIDER_IDEMPOTENCY_ENABLED, name="SMS_PROVIDER_IDEMPOTENCY_ENABLED")
+        reconciliation_enabled = _parse_bool(settings.SMS_PROVIDER_RECONCILIATION_ENABLED, name="SMS_PROVIDER_RECONCILIATION_ENABLED")
+        daily_limit = _parse_nonnegative_int(settings.SMS_DAILY_SEND_LIMIT, name="SMS_DAILY_SEND_LIMIT")
+        recipient_daily_limit = _parse_nonnegative_int(settings.SMS_PER_RECIPIENT_DAILY_LIMIT, name="SMS_PER_RECIPIENT_DAILY_LIMIT")
+        cost_limit = _parse_nonnegative_float(settings.SMS_MAX_COST_PER_DAY, name="SMS_MAX_COST_PER_DAY")
+        allowlist = _provider_allowlist(settings.SMS_PROVIDER_ALLOWLIST)
+        recipient_allowlist = recipient_allowlist or StaticRecipientAllowlist.from_csv(settings.SMS_ALLOWED_RECIPIENTS)
+        recipient = normalize_nepal_phone_for_safety(payload.get("recipient"))
+    except Exception:
+        return _block(provider, classification, DECISION_MALFORMED_CONFIGURATION, "SMS safety configuration is malformed")
+    if not real_sms_enabled:
+        return _block(provider, classification, DECISION_REAL_SMS_DISABLED, "real SMS feature gate is disabled")
+    if emergency_stop:
+        return _block(provider, classification, DECISION_EMERGENCY_STOP, "SMS emergency stop is active")
+    if provider not in allowlist:
+        return _block(provider, classification, DECISION_PROVIDER_NOT_ALLOWLISTED, "SMS provider is not allowlisted")
+    if provider not in VERIFIED_REAL_SMS_PROVIDERS:
+        return _block(provider, classification, DECISION_PROVIDER_READINESS_UNVERIFIED, "SMS provider live readiness is unverified")
+    if not recipient_allowlist.is_allowed(recipient):
+        return _block(provider, classification, DECISION_RECIPIENT_NOT_ALLOWLISTED, "SMS recipient is not allowlisted")
+    if daily_limit <= 0:
+        return _block(provider, classification, DECISION_DAILY_LIMIT_CLOSED, "SMS daily send limit is closed")
+    if recipient_daily_limit <= 0:
+        return _block(provider, classification, DECISION_PER_RECIPIENT_LIMIT_CLOSED, "SMS per-recipient daily limit is closed")
+    if cost_limit <= 0:
+        return _block(provider, classification, DECISION_COST_LIMIT_CLOSED, "SMS daily cost limit is closed")
+    if not idempotency_enabled:
+        return _block(provider, classification, DECISION_IDEMPOTENCY_UNCERTAIN, "provider idempotency is not enabled")
+    if not reconciliation_enabled:
+        return _block(provider, classification, DECISION_RECONCILIATION_UNAVAILABLE, "provider reconciliation is not enabled")
+    try:
+        from app.services.sms_policy import (
+            ConsentDecision, PersistentConsentService, PersistentSuppressionService,
+            PersistentTemplateApprovalService, SuppressionDecision, TemplateDecision,
+            QuotaDecision, reserve_sms_quota,
+        )
+        consent = await PersistentConsentService(session).check_sms_consent(recipient=recipient, payload=payload)
+        if consent.decision != ConsentDecision.CONSENT_GRANTED.value:
+            return _block(provider, classification, DECISION_CONSENT_DENIED, consent.safe_message or "consent denied")
+        template = await PersistentTemplateApprovalService(session).check_template(payload=payload)
+        if template.decision != TemplateDecision.TEMPLATE_APPROVED.value:
+            return _block(provider, classification, DECISION_TEMPLATE_NOT_APPROVED, template.safe_message or "template not approved")
+        suppression = await PersistentSuppressionService(session).check_suppression(recipient=recipient, payload=payload)
+        if suppression.decision != SuppressionDecision.NOT_SUPPRESSED.value:
+            return _block(provider, classification, DECISION_SUPPRESSED, suppression.safe_message or "recipient suppressed")
+        quota = await reserve_sms_quota(session, payload=payload, recipient=recipient, provider=provider)
+        if quota.decision not in {QuotaDecision.QUOTA_RESERVED.value, QuotaDecision.QUOTA_REUSED.value}:
+            return _block(provider, classification, DECISION_ATOMIC_QUOTA_UNAVAILABLE, quota.safe_message or "quota reservation failed")
+        return _record(DispatchSafetyDecision(True, DECISION_ALLOWED_REAL_PROVIDER, provider, classification, "real SMS policy controls passed"))
+    except Exception:
+        logger.exception("persistent SMS safety gate failed closed")
+        return _block(provider, classification, DECISION_MALFORMED_CONFIGURATION, "SMS safety service check failed closed")

@@ -114,7 +114,7 @@ class Settings:
     SMS_ALLOWED_RECIPIENTS: str = os.getenv("SMS_ALLOWED_RECIPIENTS", "")
     SMS_DAILY_SEND_LIMIT: int = int(os.getenv("SMS_DAILY_SEND_LIMIT", "0"))
     SMS_PER_RECIPIENT_DAILY_LIMIT: int = int(os.getenv("SMS_PER_RECIPIENT_DAILY_LIMIT", "0"))
-    SMS_MAX_COST_PER_DAY: float = float(os.getenv("SMS_MAX_COST_PER_DAY", "0"))
+    SMS_MAX_COST_PER_DAY: str = os.getenv("SMS_MAX_COST_PER_DAY", "0")
     SMS_EMERGENCY_STOP: bool = os.getenv("SMS_EMERGENCY_STOP", "true").strip().lower() in ("1", "true", "yes", "on")
     SMS_PROVIDER_IDEMPOTENCY_ENABLED: bool = os.getenv("SMS_PROVIDER_IDEMPOTENCY_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
     SMS_PROVIDER_RECONCILIATION_ENABLED: bool = os.getenv("SMS_PROVIDER_RECONCILIATION_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
@@ -127,6 +127,9 @@ class Settings:
     SMS_REQUEST_TIMEOUT_SECONDS: float = float(os.getenv("SMS_REQUEST_TIMEOUT_SECONDS", "10"))
     SMS_CALLBACK_SECRET: str = os.getenv("SMS_CALLBACK_SECRET", "")
     SMS_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS: int = int(os.getenv("SMS_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS", "300"))
+    SMS_QUOTA_TIMEZONE: str = os.getenv("SMS_QUOTA_TIMEZONE", "Asia/Kathmandu")
+    SMS_ESTIMATED_COST_PER_MESSAGE: str = os.getenv("SMS_ESTIMATED_COST_PER_MESSAGE", "1")
+    SMS_POLICY_HASH_PEPPER: str = os.getenv("SMS_POLICY_HASH_PEPPER", "")
     JASMIN_HTTP_URL: str = os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401/send")
 
     # ── Scheduled client communication reminders (Phase 5, safe-off) ───────
