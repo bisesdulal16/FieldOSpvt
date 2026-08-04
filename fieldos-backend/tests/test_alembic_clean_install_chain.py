@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
-EXPECTED_HEAD = "014_sms_policy_controls"
+EXPECTED_HEAD = "015_schema_parity_alignment"
 POLICY_TABLES = {
     "sms_consent_evidence",
     "sms_suppression_records",
