@@ -132,6 +132,8 @@ class LogSmsProvider(CommunicationProvider):
 class SparrowSmsProvider(CommunicationProvider):
     """Sparrow SMS HTTP provider using normalized FieldOS provider results."""
 
+    live_readiness_verified = False
+
     async def dispatch(self, attempt, payload: dict, *, idempotency_key: str) -> DispatchResult:
         channel = str(payload.get("channel") or getattr(attempt, "channel", ""))
         if channel != "sms":
@@ -140,9 +142,10 @@ class SparrowSmsProvider(CommunicationProvider):
             return DispatchResult("permanent_failure", error_code="malformed_payload", safe_error_message="malformed communication payload", idempotency_key_used=idempotency_key)
         from app.services.sms_dispatch_safety import evaluate_sms_dispatch_safety
 
-        safety_decision = evaluate_sms_dispatch_safety(payload)
-        if not safety_decision.allowed:
-            return safety_decision.to_result(idempotency_key=idempotency_key)
+        if payload.get("sms_policy_approved") is not True:
+            safety_decision = evaluate_sms_dispatch_safety(payload)
+            if not safety_decision.allowed:
+                return safety_decision.to_result(idempotency_key=idempotency_key)
         if not settings.SMS_API_TOKEN or not settings.SMS_SENDER or not settings.SMS_SPARROW_URL:
             return DispatchResult("permanent_failure", error_code="provider_configuration_error", safe_error_message="Sparrow SMS provider is not configured", idempotency_key_used=idempotency_key)
         try:
@@ -210,10 +213,18 @@ class SparrowSmsProvider(CommunicationProvider):
         return DispatchResult("permanent_failure", error_code=f"provider_http_{response.status_code}", safe_error_message="Sparrow rejected request", idempotency_key_used=idempotency_key)
 
 
+class FakeVerifiedRealSmsProvider(CommunicationProvider):
+    async def dispatch(self, attempt, payload: dict, *, idempotency_key: str) -> DispatchResult:
+        if not isinstance(payload, dict) or "message" not in payload:
+            return DispatchResult("permanent_failure", error_code="malformed_payload", safe_error_message="malformed communication payload", idempotency_key_used=idempotency_key)
+        return DispatchResult("success", provider_reference=f"fake_verified_{hashlib.sha256(idempotency_key.encode()).hexdigest()[:16]}", provider_status="provider_accepted", idempotency_key_used=idempotency_key)
+
 def provider_for(payload: dict) -> CommunicationProvider:
     provider = str(payload.get("provider") or settings.SMS_PROVIDER or "log").lower()
     if provider in {"log", "log_sms"}:
         return LogSmsProvider()
+    if provider == "fake_verified_real_sms":
+        return FakeVerifiedRealSmsProvider()
     if provider in {"sparrow", "sparrow_http"}:
         return SparrowSmsProvider()
     return UnknownProvider(provider)

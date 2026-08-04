@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Integer, Text, DateTime, ForeignKey, UniqueConstraint, Numeric
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -36,6 +36,8 @@ class ClientCommunicationEvent(Base):
     source_system: Mapped[str] = mapped_column(String(50), nullable=False, default="fieldos")
     source_reference: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     language: Mapped[str] = mapped_column(String(12), nullable=False, default="en")
+    sms_template_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    sms_template_version: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     priority: Mapped[str] = mapped_column(String(20), nullable=False, default="normal", index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -74,6 +76,9 @@ class ClientCommunicationAttempt(Base):
     callback_payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     client_response: Mapped[str | None] = mapped_column(String(40), nullable=True)
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sms_template_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    sms_template_version: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    provider_call_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -108,6 +113,9 @@ class ClientCommunicationOutbox(Base):
     last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_recovered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_recovered_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    sms_template_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    sms_template_version: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    provider_call_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -149,3 +157,94 @@ class ClientCommunicationCallbackReceipt(Base):
     callback_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     action_taken: Mapped[str] = mapped_column(String(40), nullable=False, default="received")
+
+
+
+class SmsConsentEvidence(Base):
+    __tablename__ = "sms_consent_evidence"
+    __table_args__ = (
+        UniqueConstraint("recipient_hash", "purpose", "consent_version", "branch_id", "status", name="uq_sms_consent_record_scope"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
+    recipient_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    recipient_hash_version: Mapped[str] = mapped_column(String(40), nullable=False, default="hmac_sha256_v1", index=True)
+    protected_recipient_ref: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    purpose: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    consent_source: Mapped[str] = mapped_column(String(80), nullable=False)
+    consent_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
+    granted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    recorded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    evidence_reference: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+class SmsSuppressionRecord(Base):
+    __tablename__ = "sms_suppression_records"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    recipient_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    recipient_hash_version: Mapped[str] = mapped_column(String(40), nullable=False, default="hmac_sha256_v1", index=True)
+    protected_recipient_ref: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    scope: Mapped[str] = mapped_column(String(40), nullable=False, default="global", index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    reason: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
+    active: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    effective_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    recorded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+class SmsApprovedTemplate(Base):
+    __tablename__ = "sms_approved_templates"
+    __table_args__ = (UniqueConstraint("template_key", "version", "language", "branch_id", name="uq_sms_template_version_scope"),)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    template_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    version: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    language: Mapped[str] = mapped_column(String(12), nullable=False, default="en", index=True)
+    purpose: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    body_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    managed_content_ref: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    allowed_variables_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    active: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
+    approval_status: Mapped[str] = mapped_column(String(30), nullable=False, default="draft", index=True)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    tenant_scope: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+class SmsQuotaReservation(Base):
+    __tablename__ = "sms_quota_reservations"
+    __table_args__ = (
+        UniqueConstraint("reservation_key", name="uq_sms_quota_reservation_key"),
+        UniqueConstraint("outbox_id", name="uq_sms_quota_outbox"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    reservation_key: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    outbox_id: Mapped[int | None] = mapped_column(ForeignKey("client_communication_outbox.id"), nullable=True, index=True)
+    attempt_id: Mapped[int | None] = mapped_column(ForeignKey("client_communication_attempts.id"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    recipient_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    recipient_hash_version: Mapped[str] = mapped_column(String(40), nullable=False, default="hmac_sha256_v1", index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"), nullable=True, index=True)
+    quota_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    quota_timezone: Mapped[str] = mapped_column(String(80), nullable=False)
+    reserved_message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    reserved_cost: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="reserved", index=True)
+    reserved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    provider_call_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    uncertain_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

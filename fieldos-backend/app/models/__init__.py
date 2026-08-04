@@ -31,6 +31,7 @@ from app.models.client_communication import (
     ClientCommunicationOutbox,
     ClientCommunicationWorkerHeartbeat,
     ClientCommunicationCallbackReceipt,
+    SmsConsentEvidence, SmsSuppressionRecord, SmsApprovedTemplate, SmsQuotaReservation,
 )
 
 __all__ = [
@@ -66,5 +67,6 @@ __all__ = [
     "ClientCommunicationOutbox",
     "ClientCommunicationWorkerHeartbeat",
     "ClientCommunicationCallbackReceipt",
+    "SmsConsentEvidence", "SmsSuppressionRecord", "SmsApprovedTemplate", "SmsQuotaReservation",
     "Announcement",
 ]
