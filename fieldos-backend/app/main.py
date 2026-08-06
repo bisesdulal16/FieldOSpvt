@@ -8,8 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import text
+
 from app.config import settings
-from app.database import engine, Base
+from app.database import engine
 
 # Error monitoring — only active when SENTRY_DSN is set (no-op otherwise).
 if settings.SENTRY_DSN:
@@ -60,12 +62,37 @@ from app.routers import (
 logger = logging.getLogger(__name__)
 
 
+EXPECTED_ALEMBIC_HEAD = "015_schema_parity_alignment"
+
+
+async def _verify_database_ready() -> None:
+    """Fail fast when the database was not prepared by Alembic.
+
+    Runtime startup must not use SQLAlchemy create_all to hide missing tables.
+    PostgreSQL deployments are expected to be migrated explicitly before boot.
+    SQLite test/dev databases are prepared by isolated fixtures or seed scripts.
+    """
+    if settings.is_sqlite:
+        logger.info("SQLite startup schema creation skipped; fixtures/seed scripts own temporary schemas.")
+        return
+
+    try:
+        async with engine.connect() as conn:
+            version = await conn.scalar(text("SELECT version_num FROM alembic_version"))
+    except Exception as exc:  # sanitized: do not expose connection strings/secrets
+        raise RuntimeError("Database is not Alembic-ready; run migrations before starting FieldOS.") from exc
+
+    if version != EXPECTED_ALEMBIC_HEAD:
+        raise RuntimeError(
+            f"Database schema revision {version!r} is not supported; expected {EXPECTED_ALEMBIC_HEAD!r}."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("FieldOS Nepal backend starting up...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created/verified.")
+    await _verify_database_ready()
+    logger.info("Database schema revision verified.")
     # Pre-warm the local LLM (Ollama) in the background so the first voice/ask
     # request is fast. No-op if Ollama is not running.
     try:
